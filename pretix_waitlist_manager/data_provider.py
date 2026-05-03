@@ -129,7 +129,7 @@ class PretixDataProvider:
             qs = Membership.objects.active(valid_for).filter(
                 customer__organizer=organizer,
                 membership_type_id=membership_type_id,
-            ).select_related("customer", "membership_type")
+            ).select_related("customer", "membership_type", "granted_in__order")
             if not include_testmode:
                 qs = qs.filter(testmode=False)
             return list(qs)
@@ -273,6 +273,9 @@ class PretixDataProvider:
                 entry.name_parts = customer.name_parts
             entry.full_clean()
             entry.save()
+            if payload.get("created"):
+                entry.created = payload["created"]
+                entry.save(update_fields=["created"])
             entry.log_action("pretix.event.orders.waitinglist.added", user=user)
             return entry
 

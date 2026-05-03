@@ -16,6 +16,8 @@ class FakeProvider:
     def __init__(self):
         self.created_entries = []
         base = datetime(2026, 5, 1, 12, 0, 0)
+        self.membership_created = base - timedelta(days=30)
+        self.membership_fallback_created = base - timedelta(days=10)
         self.waitlist_entries = [
             SimpleNamespace(
                 pk=1,
@@ -55,9 +57,21 @@ class FakeProvider:
         assert valid_for == "subev"
         assert include_testmode is False
         return [
-            {"customer": {"identifier": "CUST1"}},
-            {"customer": {"identifier": "CUST2"}},
-            {"customer": {"identifier": "CUST2"}},
+            {
+                "customer": {"identifier": "CUST1"},
+                "granted_in": {"order": {"datetime": self.membership_created}},
+                "date_start": self.membership_created + timedelta(days=1),
+            },
+            {
+                "customer": {"identifier": "CUST2"},
+                "granted_in": None,
+                "date_start": self.membership_fallback_created,
+            },
+            {
+                "customer": {"identifier": "CUST2"},
+                "granted_in": {"order": {"datetime": self.membership_fallback_created + timedelta(days=5)}},
+                "date_start": self.membership_fallback_created + timedelta(days=5),
+            },
             {"customer": {"identifier": "CUST3"}},
         ]
 
@@ -207,6 +221,7 @@ def test_importer_dry_run_and_actual_import():
                     "name": "Customer One",
                     "locale": "en",
                 },
+                "created": provider.membership_created,
                 "email": "one@example.org",
                 "item": 5,
                 "variation": 9,
@@ -219,6 +234,16 @@ def test_importer_dry_run_and_actual_import():
             None,
         )
     ]
+
+
+def test_importer_prefers_order_datetime_and_falls_back_to_membership_start():
+    provider = FakeProvider()
+    importer = WaitlistMembershipImporter(provider)
+
+    created = importer._membership_created_by_customer(provider.list_memberships("orga", 7, "subev"))
+
+    assert created["CUST1"] == provider.membership_created
+    assert created["CUST2"] == provider.membership_fallback_created
 
 
 def test_import_preview_uses_samples_and_waitlist_rows():

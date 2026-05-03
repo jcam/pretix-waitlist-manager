@@ -51,6 +51,7 @@ class WaitlistMembershipImporter:
             valid_for,
             include_testmode=include_testmode,
         )
+        membership_created_by_customer = self._membership_created_by_customer(memberships)
         customer_ids = sorted(
             {
                 value(value(membership, "customer"), "identifier")
@@ -119,6 +120,9 @@ class WaitlistMembershipImporter:
             if not dry_run:
                 payload = {
                     "customer": customer,
+                    "created": membership_created_by_customer.get(
+                        value(customer, "identifier")
+                    ),
                     "email": email,
                     "item": target.item_id,
                     "variation": target.variation_id,
@@ -156,6 +160,40 @@ class WaitlistMembershipImporter:
             added_count=added_count,
             rows=rows,
         )
+
+    def _membership_created_by_customer(self, memberships) -> dict[str, object]:
+        """Choose one queue timestamp per customer from their memberships.
+
+        Args:
+            memberships: Membership records eligible for import.
+        Returns:
+            A mapping of customer identifiers to the earliest usable datetime.
+        """
+        created_by_customer: dict[str, object] = {}
+        for membership in memberships:
+            customer_id = value(value(membership, "customer"), "identifier")
+            if not customer_id:
+                continue
+            candidate = self._membership_created(membership)
+            if candidate is None:
+                continue
+            current = created_by_customer.get(customer_id)
+            if current is None or candidate < current:
+                created_by_customer[customer_id] = candidate
+        return created_by_customer
+
+    def _membership_created(self, membership):
+        """Resolve the historical queue datetime for one membership.
+
+        Args:
+            membership: Membership-like object being imported.
+        Returns:
+            The granting order datetime when available, otherwise the membership
+            start datetime, or `None` if neither exists.
+        """
+        granted_in = value(membership, "granted_in")
+        granted_order = value(granted_in, "order")
+        return value(granted_order, "datetime") or value(membership, "date_start")
 
     def preview(
         self,
