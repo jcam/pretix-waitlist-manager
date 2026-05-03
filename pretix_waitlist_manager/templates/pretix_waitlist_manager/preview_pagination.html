@@ -1,0 +1,32 @@
+{% load i18n %}
+{% if page.total %}
+    <div class="clearfix">
+        <p class="text-muted pull-left">
+            {% blocktrans trimmed with start=page.start end=page.end total=page.total current=page.page pages=page.pages %}
+                Showing {{ start }} to {{ end }} of {{ total }}. Page {{ current }} of {{ pages }}.
+            {% endblocktrans %}
+        </p>
+        <div class="btn-group btn-group-sm pull-right" role="group" aria-label="{% trans "Preview pagination" %}">
+            {% if page.has_previous %}
+                <a href="#"
+                   class="btn btn-default"
+                   data-preview-page-key="{{ page_key }}"
+                   data-preview-page-value="{{ page.previous_page }}">
+                    {% trans "Previous" %}
+                </a>
+            {% else %}
+                <span class="btn btn-default disabled">{% trans "Previous" %}</span>
+            {% endif %}
+            {% if page.has_next %}
+                <a href="#"
+                   class="btn btn-default"
+                   data-preview-page-key="{{ page_key }}"
+                   data-preview-page-value="{{ page.next_page }}">
+                    {% trans "Next" %}
+                </a>
+            {% else %}
+                <span class="btn btn-default disabled">{% trans "Next" %}</span>
+            {% endif %}
+        </div>
+    </div>
+{% endif %}

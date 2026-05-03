@@ -1,0 +1,34 @@
+{% extends "pretix_waitlist_manager/manager_page.html" %}
+{% load i18n %}
+{% load bootstrap3 %}
+
+{% block waitlist_manager_title %}{% trans "Waiting List Randomize" %}{% endblock %}
+{% block waitlist_manager_heading %}{% trans "Waiting List Randomize" %}{% endblock %}
+
+{% block waitlist_manager_content %}
+    <div class="panel panel-default">
+        <div class="panel-heading">
+            {% trans "Randomize a waitlist" %}
+        </div>
+        <div class="panel-body">
+            <form action="{{ randomize_action_url }}" method="post" class="form-horizontal" id="waitlist-randomize-form">
+                {% csrf_token %}
+                {% bootstrap_form randomize_form layout="horizontal" %}
+                <div class="form-group submit-group">
+                    <button type="submit" name="run_randomize" class="btn btn-warning">
+                        {% trans "Randomize waitlist" %}
+                    </button>
+                </div>
+            </form>
+            <div
+                class="waitlist-manager-preview"
+                id="waitlist-randomize-preview"
+                data-form-id="waitlist-randomize-form"
+                data-preview-url="{{ randomize_preview_url }}"
+                data-seed-field-id="id_randomize-seed"
+                data-preview-error-message="{% trans "Preview could not be loaded." %}">
+                {% include "pretix_waitlist_manager/randomize_preview.html" %}
+            </div>
+        </div>
+    </div>
+{% endblock %}

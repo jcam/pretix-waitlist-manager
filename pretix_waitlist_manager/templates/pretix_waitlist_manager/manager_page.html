@@ -1,0 +1,12 @@
+{% extends "pretixcontrol/event/base.html" %}
+{% load i18n %}
+{% load static %}
+
+{% block title %}{% block waitlist_manager_title %}{% trans "Waitlist Management" %}{% endblock %}{% endblock %}
+{% block content %}
+    <h1>{% block waitlist_manager_heading %}{% trans "Waitlist Management" %}{% endblock %}</h1>
+
+    {% block waitlist_manager_content %}{% endblock %}
+
+    <script type="text/javascript" src="{% static "pretix_waitlist_manager/waitlist_manager.js" %}"></script>
+{% endblock %}

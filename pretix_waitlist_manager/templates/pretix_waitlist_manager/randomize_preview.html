@@ -1,0 +1,103 @@
+{% load i18n %}
+<div class="panel panel-default">
+    <div class="panel-heading">
+        {% trans "Before" %}
+    </div>
+    <div class="panel-body">
+        {% if error %}
+            <div class="alert alert-warning">{{ error }}</div>
+        {% elif preview %}
+            <p class="text-muted">
+                {% blocktrans trimmed with eligible=preview.eligible_entries total=preview.total_entries %}
+                    {{ eligible }} of {{ total }} entries will be randomized.
+                {% endblocktrans %}
+            </p>
+            {% include "pretix_waitlist_manager/preview_pagination.html" with page=preview.before_page page_key="before_page" %}
+            <table class="table table-condensed table-hover">
+                <thead>
+                    <tr>
+                        <th>{% trans "Name" %}</th>
+                        <th>{% trans "Email" %}</th>
+                        <th>{% trans "Registered" %}</th>
+                        <th>{% trans "Priority" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in preview.before_page.rows %}
+                        <tr>
+                            <td>{{ row.name|default:"-" }}</td>
+                            <td>{{ row.email|default:"-" }}</td>
+                            <td>{{ row.created|date:"SHORT_DATETIME_FORMAT" }}</td>
+                            <td>{{ row.priority }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-muted">
+                                {% trans "No current waitlist entries for this selection." %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% include "pretix_waitlist_manager/preview_pagination.html" with page=preview.before_page page_key="before_page" %}
+        {% else %}
+            <p class="text-muted">
+                {% trans "Choose a waitlist to preview the current order." %}
+            </p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="panel panel-default">
+    <div class="panel-heading">
+        {% trans "After" %}
+    </div>
+    <div class="panel-body">
+        {% if error %}
+            <div class="alert alert-warning">{{ error }}</div>
+        {% elif preview %}
+            <p class="text-muted">
+                {% blocktrans trimmed with grouped_entries=preview.grouped_entries grouped_clusters=preview.grouped_clusters %}
+                    {{ grouped_entries }} grouped entries across {{ grouped_clusters }} clusters share a priority.
+                {% endblocktrans %}
+            </p>
+            {% include "pretix_waitlist_manager/preview_pagination.html" with page=preview.after_page page_key="after_page" %}
+            <table class="table table-condensed table-hover">
+                <thead>
+                    <tr>
+                        <th>{% trans "Name" %}</th>
+                        <th>{% trans "Email" %}</th>
+                        <th>{% trans "Registered" %}</th>
+                        <th>{% trans "Priority" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in preview.after_page.rows %}
+                        <tr>
+                            <td>{{ row.name|default:"-" }}</td>
+                            <td>{{ row.email|default:"-" }}</td>
+                            <td>{{ row.created|date:"SHORT_DATETIME_FORMAT" }}</td>
+                            <td>{{ row.priority }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-muted">
+                                {% trans "The randomized order will appear here." %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% include "pretix_waitlist_manager/preview_pagination.html" with page=preview.after_page page_key="after_page" %}
+            <p class="text-muted">
+                {% blocktrans trimmed with seed=preview.seed %}
+                    Preview seed: {{ seed }}
+                {% endblocktrans %}
+            </p>
+        {% else %}
+            <p class="text-muted">
+                {% trans "The randomized order will appear here." %}
+            </p>
+        {% endif %}
+    </div>
+</div>

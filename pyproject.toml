@@ -1,0 +1,43 @@
+[project]
+name = "pretix-waitlist-manager"
+dynamic = ["version"]
+description = "Manage pretix waitlists with membership imports and randomized ordering"
+readme = "README.rst"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["pretix", "waitlist", "memberships"]
+authors = [
+    {name = "Jesse"},
+]
+maintainers = [
+    {name = "Jesse"},
+]
+
+dependencies = []
+
+[project.entry-points."pretix.plugin"]
+pretix_waitlist_manager = "pretix_waitlist_manager:PretixPluginMeta"
+
+[project.entry-points."distutils.commands"]
+build = "pretix_plugin_build.build:CustomBuild"
+
+[build-system]
+requires = [
+    "setuptools>=64",
+    "pretix-plugin-build",
+]
+build-backend = "setuptools.build_meta"
+
+[project.urls]
+homepage = "https://github.com/pretix-unofficial/pretix-waitlist-manager"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "pretix_waitlist_manager.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["pretix*"]
+namespaces = false
