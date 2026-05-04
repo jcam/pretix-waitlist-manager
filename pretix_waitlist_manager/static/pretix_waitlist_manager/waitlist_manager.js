@@ -1,4 +1,86 @@
 (function () {
+    function managedFields(form) {
+        return Array.from(form.querySelectorAll("select, input, textarea")).filter((field) => {
+            return !["button", "submit", "hidden"].includes(field.type);
+        });
+    }
+
+    function storageKey(form) {
+        return `pretix-waitlist-manager:${window.location.pathname}:${form.id}`;
+    }
+
+    function saveFormState(form) {
+        const payload = {};
+        managedFields(form).forEach((field) => {
+            if (!field.name) {
+                return;
+            }
+
+            if (field.type === "checkbox") {
+                payload[field.name] = field.checked;
+            } else if (field.type === "radio") {
+                if (field.checked) {
+                    payload[field.name] = field.value;
+                }
+            } else {
+                payload[field.name] = field.value;
+            }
+        });
+        window.sessionStorage.setItem(storageKey(form), JSON.stringify(payload));
+    }
+
+    function restoreFormState(form) {
+        const raw = window.sessionStorage.getItem(storageKey(form));
+        if (!raw) {
+            return;
+        }
+
+        let payload;
+        try {
+            payload = JSON.parse(raw);
+        } catch (error) {
+            window.sessionStorage.removeItem(storageKey(form));
+            return;
+        }
+
+        managedFields(form).forEach((field) => {
+            if (!field.name || !(field.name in payload)) {
+                return;
+            }
+
+            if (field.type === "checkbox") {
+                field.checked = Boolean(payload[field.name]);
+            } else if (field.type === "radio") {
+                field.checked = field.value === payload[field.name];
+            } else {
+                field.value = payload[field.name];
+            }
+        });
+    }
+
+    function suppressDirtyWarning(form) {
+        managedFields(form).forEach((field) => {
+            field.setAttribute("data-ays-ignore", "1");
+        });
+
+        if (window.jQuery) {
+            window.jQuery(form).trigger("reinitialize.areYouSure");
+        }
+    }
+
+    function initializeSessionState(form) {
+        restoreFormState(form);
+
+        const persist = () => saveFormState(form);
+        managedFields(form).forEach((field) => {
+            field.addEventListener("change", persist);
+            field.addEventListener("input", persist);
+        });
+
+        saveFormState(form);
+        suppressDirtyWarning(form);
+    }
+
     function initializeDependentAnswerSelect(preview) {
         const questionFieldId = preview.dataset.questionFieldId;
         const answerFieldId = preview.dataset.answerFieldId;
@@ -35,6 +117,8 @@
             if (!answerField.value && answerChoices.length) {
                 answerField.value = answerChoices[0][0];
             }
+
+            answerField.dispatchEvent(new Event("change", {bubbles: true}));
         };
 
         questionField.addEventListener("change", updateAnswerChoices);
@@ -120,6 +204,10 @@
     }
 
     function initialize() {
+        document.querySelectorAll("#waitlist-import-form, #waitlist-randomize-form").forEach((form) => {
+            initializeSessionState(form);
+        });
+
         document.querySelectorAll(".waitlist-manager-preview").forEach((preview) => {
             initializeDependentAnswerSelect(preview);
             initializePreview(preview);
