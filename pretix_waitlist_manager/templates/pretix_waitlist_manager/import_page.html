@@ -20,15 +20,15 @@
                     </button>
                 </div>
             </form>
-            {{ import_answer_choices_by_question|json_script:"waitlist-import-answer-choices" }}
             <div
                 class="waitlist-manager-preview"
                 id="waitlist-import-preview"
                 data-form-id="waitlist-import-form"
                 data-preview-url="{{ import_preview_url }}"
+                data-options-url="{{ import_options_url }}"
+                data-membership-field-id="id_import-membership_type"
                 data-question-field-id="id_import-question"
                 data-answer-field-id="id_import-answer"
-                data-answer-choices-id="waitlist-import-answer-choices"
                 data-preview-error-message="{% trans "Preview could not be loaded." %}">
                 {% include "pretix_waitlist_manager/import_preview.html" %}
             </div>

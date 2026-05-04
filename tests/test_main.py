@@ -96,6 +96,11 @@ class FakeProvider:
                         "name": "Customer Two",
                         "locale": "de",
                     },
+                    "CUST3": {
+                        "email": "",
+                        "name": "Customer Three",
+                        "locale": "en",
+                    },
                 }[customer_id],
             }
             for customer_id in customer_ids
@@ -156,8 +161,41 @@ def test_build_question_and_answer_choices():
             "options": [],
         },
     ]
-    assert build_question_choices(questions) == [("10", "Meal")]
-    assert build_question_answer_choices(questions) == {"10": [("21", "Vegan")]}
+    assert build_question_choices(questions) == [
+        ("", "No question filter"),
+        ("10", "Meal"),
+    ]
+    assert build_question_answer_choices(questions) == {
+        "": [("", "No answer filter")],
+        "10": [("", "No answer filter"), ("21", "Vegan")],
+    }
+
+
+def test_build_question_choices_uses_only_answered_options():
+    questions = [
+        {
+            "id": 10,
+            "type": "M",
+            "question": {"en": "Ticket access"},
+            "options": [
+                {"id": 21, "answer": {"en": "Standard"}},
+                {"id": 22, "answer": {"en": "VIP"}},
+            ],
+        }
+    ]
+
+    assert build_question_choices(questions) == [
+        ("", "No question filter"),
+        ("10", "Ticket access"),
+    ]
+    assert build_question_answer_choices(questions) == {
+        "": [("", "No answer filter")],
+        "10": [
+            ("", "No answer filter"),
+            ("21", "Standard"),
+            ("22", "VIP"),
+        ],
+    }
 
 
 def test_build_target_product_choices():
@@ -233,6 +271,29 @@ def test_importer_dry_run_and_actual_import():
             },
             None,
         )
+    ]
+
+
+def test_importer_without_question_filter_imports_all_members():
+    provider = FakeProvider()
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        question_id=None,
+        option_id=None,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        dry_run=True,
+    )
+
+    assert result.matched_customers == 3
+    assert [row.status for row in result.rows] == [
+        "would_add",
+        "already_waiting",
+        "missing_email",
     ]
 
 

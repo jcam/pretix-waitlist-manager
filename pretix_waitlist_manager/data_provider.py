@@ -1,5 +1,6 @@
 from typing import Any
 
+from django.db.models import Prefetch, Q
 from django_scopes import scope
 
 from pretix.base.models import (
@@ -9,6 +10,7 @@ from pretix.base.models import (
     MembershipType,
     Question,
     QuestionAnswer,
+    QuestionOption,
     SubEvent,
     WaitingListEntry,
 )
@@ -45,6 +47,44 @@ class PretixDataProvider:
                 .order_by("position", "id")
             )
 
+    def list_answered_import_questions(
+        self,
+        organizer,
+        event,
+        customer_ids: list[str],
+    ) -> list[Question]:
+        """List choice questions answered by a specific customer cohort.
+
+        Args:
+            organizer: Organizer owning the scoped query.
+            event: Event whose questions and answers should be searched.
+            customer_ids: Customer identifiers in the selected membership cohort.
+        Returns:
+            Choice questions with only the answer options used by that cohort.
+        """
+        if not customer_ids:
+            return []
+
+        with scope(organizer=organizer):
+            answered_options = QuestionOption.objects.filter(
+                answers__question__event=event,
+                answers__orderposition__order__event=event,
+                answers__orderposition__canceled=False,
+                answers__orderposition__order__customer__identifier__in=customer_ids,
+            ).distinct().order_by("position", "id")
+            return list(
+                Question.objects.filter(
+                    event=event,
+                    type__in=[Question.TYPE_CHOICE, Question.TYPE_CHOICE_MULTIPLE],
+                    answers__orderposition__order__event=event,
+                    answers__orderposition__canceled=False,
+                    answers__orderposition__order__customer__identifier__in=customer_ids,
+                )
+                .distinct()
+                .prefetch_related(Prefetch("options", queryset=answered_options))
+                .order_by("position", "id")
+            )
+
     def list_group_questions(self, event) -> list[Question]:
         """List text-based questions that can define grouping rules.
 
@@ -58,6 +98,42 @@ class PretixDataProvider:
                 event.questions.filter(
                     type__in=[Question.TYPE_STRING, Question.TYPE_TEXT]
                 ).order_by("position", "id")
+            )
+
+    def list_answered_group_questions(
+        self,
+        organizer,
+        event,
+        emails: list[str],
+    ) -> list[Question]:
+        """List text questions answered by people on the selected waitlist.
+
+        Args:
+            organizer: Organizer owning the scoped query.
+            event: Event whose order answers should be searched.
+            emails: Waitlist-entry emails relevant to the current selection.
+        Returns:
+            Text questions with at least one non-empty answer from the cohort.
+        """
+        if not emails:
+            return []
+
+        with scope(organizer=organizer):
+            return list(
+                Question.objects.filter(
+                    event=event,
+                    type__in=[Question.TYPE_STRING, Question.TYPE_TEXT],
+                    answers__orderposition__order__event=event,
+                    answers__orderposition__canceled=False,
+                    answers__answer__gt="",
+                )
+                .filter(
+                    Q(answers__orderposition__attendee_email__in=emails)
+                    | Q(answers__orderposition__order__customer__email__in=emails)
+                    | Q(answers__orderposition__order__email__in=emails)
+                )
+                .distinct()
+                .order_by("position", "id")
             )
 
     def list_waitlist_items(self, event) -> list[Item]:

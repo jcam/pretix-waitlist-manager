@@ -1,10 +1,12 @@
 from django.urls import re_path
 
 from .views import (
+    WaitlistImportOptionsView,
     WaitlistImportPageView,
     WaitlistImportPreviewView,
     WaitlistImportRunView,
     WaitlistManagerView,
+    WaitlistRandomizeOptionsView,
     WaitlistRandomizePageView,
     WaitlistRandomizePreviewView,
     WaitlistRandomizeRunView,
@@ -27,6 +29,11 @@ urlpatterns = [
         name="import_preview",
     ),
     re_path(
+        r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/waitlist-manager/import-options$",
+        WaitlistImportOptionsView.as_view(),
+        name="import_options",
+    ),
+    re_path(
         r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/waitlist-manager/import$",
         WaitlistImportRunView.as_view(),
         name="run_import",
@@ -40,6 +47,11 @@ urlpatterns = [
         r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/waitlist-manager/randomize-preview$",
         WaitlistRandomizePreviewView.as_view(),
         name="randomize_preview",
+    ),
+    re_path(
+        r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/waitlist-manager/randomize-options$",
+        WaitlistRandomizeOptionsView.as_view(),
+        name="randomize_options",
     ),
     re_path(
         r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/waitlist-manager/randomize$",

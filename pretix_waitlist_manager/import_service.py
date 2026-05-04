@@ -20,8 +20,8 @@ class WaitlistMembershipImporter:
         organizer,
         event,
         membership_type_id: int,
-        question_id: int,
-        option_id: int,
+        question_id: int | None,
+        option_id: int | None,
         target: WaitlistTarget,
         subevent_id: int | None = None,
         include_testmode: bool = False,
@@ -34,8 +34,8 @@ class WaitlistMembershipImporter:
             organizer: Organizer owning the data scope.
             event: Event whose waitlist is being updated.
             membership_type_id: Membership type used to select members.
-            question_id: Question whose answer filters members.
-            option_id: Question option that must be selected.
+            question_id: Optional question whose answer filters members.
+            option_id: Optional question option that must be selected.
             target: Selected waitlist item or variation.
             subevent_id: Optional subevent to scope the waitlist.
             include_testmode: Whether testmode memberships are eligible.
@@ -60,13 +60,16 @@ class WaitlistMembershipImporter:
             }
         )
 
-        matching_customer_ids = self.provider.get_matching_customer_ids(
-            organizer,
-            event,
-            customer_ids,
-            question_id,
-            option_id,
-        )
+        if question_id and option_id:
+            matching_customer_ids = self.provider.get_matching_customer_ids(
+                organizer,
+                event,
+                customer_ids,
+                question_id,
+                option_id,
+            )
+        else:
+            matching_customer_ids = set(customer_ids)
         matched_customers = self.provider.list_customers(
             organizer,
             sorted(matching_customer_ids),
@@ -200,8 +203,8 @@ class WaitlistMembershipImporter:
         organizer,
         event,
         membership_type_id: int,
-        question_id: int,
-        option_id: int,
+        question_id: int | None,
+        option_id: int | None,
         target: WaitlistTarget,
         subevent_id: int | None = None,
         include_testmode: bool = False,
@@ -215,8 +218,8 @@ class WaitlistMembershipImporter:
             organizer: Organizer owning the data scope.
             event: Event whose waitlist is being previewed.
             membership_type_id: Membership type used to select members.
-            question_id: Question whose answer filters members.
-            option_id: Question option that must be selected.
+            question_id: Optional question whose answer filters members.
+            option_id: Optional question option that must be selected.
             target: Selected waitlist item or variation.
             subevent_id: Optional subevent to scope the waitlist.
             include_testmode: Whether testmode memberships are eligible.

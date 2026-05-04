@@ -20,6 +20,7 @@ from .services import (
     build_target_product_choices,
     parse_target_choice,
 )
+from .service_helpers import value
 
 
 SECTION_SEND = "send"
@@ -43,7 +44,6 @@ def _positive_int(value, default: int = 1) -> int:
         return default
     return parsed if parsed > 0 else default
 
-
 class WaitlistManagerFormsMixin:
     """Build waitlist-manager forms, choices, and shared request helpers."""
 
@@ -58,6 +58,118 @@ class WaitlistManagerFormsMixin:
         """
         return PretixDataProvider()
 
+    def _selected_value(
+        self,
+        *,
+        field: str,
+        data,
+        initial,
+        choices: list[tuple[str, str]],
+        prefix: str,
+    ) -> str:
+        """Resolve one field value from bound data, initial data, or defaults.
+
+        Args:
+            field: Field name without prefix.
+            data: Optional bound form data.
+            initial: Optional initial form values.
+            choices: Available field choices.
+            prefix: Form prefix used in request data.
+        Returns:
+            The selected string value for the field.
+        """
+        if data:
+            value_ = data.get(f"{prefix}-{field}")
+            if value_ is not None:
+                return value_
+        if initial and initial.get(field) is not None:
+            return str(initial[field])
+        return choices[0][0] if choices else ""
+
+    def _import_question_choices(
+        self,
+        organizer,
+        event,
+        membership_type_id: str | int | None,
+    ) -> tuple[list[tuple[str, str]], dict[str, list[tuple[str, str]]]]:
+        """Build import question and answer choices for one membership type.
+
+        Args:
+            organizer: Organizer owning the membership and answer queries.
+            event: Event whose order answers should be searched.
+            membership_type_id: Selected membership type id.
+        Returns:
+            Question choices and per-question answer choices.
+        """
+        if not membership_type_id:
+            return build_question_choices([]), build_question_answer_choices([])
+
+        memberships = self.provider.list_memberships(
+            organizer,
+            int(membership_type_id),
+            event,
+            include_testmode=True,
+        )
+        customer_ids = sorted(
+            {
+                value(value(membership, "customer"), "identifier")
+                for membership in memberships
+                if value(value(membership, "customer"), "identifier")
+            }
+        )
+        answered_questions = self.provider.list_answered_import_questions(
+            organizer,
+            event,
+            customer_ids,
+        )
+        return (
+            build_question_choices(answered_questions),
+            build_question_answer_choices(answered_questions),
+        )
+
+    def _randomize_group_question_choices(
+        self,
+        organizer,
+        event,
+        target_value: str | None,
+        subevent_value: str | None,
+    ) -> list[tuple[str, str]]:
+        """Build group-question choices for one waitlist selection.
+
+        Args:
+            organizer: Organizer owning the waitlist and answer queries.
+            event: Event whose waiting list and answers should be searched.
+            target_value: Serialized waitlist target value.
+            subevent_value: Serialized subevent id, if any.
+        Returns:
+            Group-question choices for the selected waitlist target.
+        """
+        if not target_value:
+            return build_group_question_choices([])
+
+        target = parse_target_choice(target_value)
+        subevent_id = int(subevent_value) if subevent_value else None
+        entries = self.provider.list_waiting_list_entries(
+            organizer,
+            event,
+            item=target.item_id,
+            variation=target.variation_id,
+            subevent=subevent_id,
+        )
+        emails = sorted(
+            {
+                (value(entry, "email") or "").strip().lower()
+                for entry in entries
+                if value(entry, "email")
+            }
+        )
+        questions = self.provider.list_answered_group_questions(
+            organizer,
+            event,
+            emails,
+        )
+        return build_group_question_choices(questions)
+
     def _resource_choices(self) -> dict[str, object]:
         """Collect all select-box choices required by the manager UI.
 
@@ -66,12 +178,14 @@ class WaitlistManagerFormsMixin:
         Returns:
             A dict of form-choice lists keyed by field group.
         """
+        cache = getattr(self, "_resource_choices_cache", None)
+        if cache is not None:
+            return cache
+
         organizer = self.request.organizer
         event = self.request.event
 
         membership_types = self.provider.list_membership_types(organizer)
-        import_questions = self.provider.list_questions(event)
-        group_questions = self.provider.list_group_questions(event)
         items = self.provider.list_waitlist_items(event)
         subevents = self.provider.list_subevents(event) if event.has_subevents else []
 
@@ -80,16 +194,16 @@ class WaitlistManagerFormsMixin:
             if item.has_variations:
                 variations_by_item[item.id] = self.provider.list_variations(item)
 
-        return {
+        target_choices = build_target_product_choices(items, variations_by_item)
+        subevent_choices = build_subevent_choices(subevents)
+
+        cache = {
             "membership_type_choices": build_membership_type_choices(membership_types),
-            "question_choices": build_question_choices(import_questions),
-            "answer_choices_by_question": build_question_answer_choices(
-                import_questions
-            ),
-            "target_choices": build_target_product_choices(items, variations_by_item),
-            "subevent_choices": build_subevent_choices(subevents),
-            "group_question_choices": build_group_question_choices(group_questions),
+            "target_choices": target_choices,
+            "subevent_choices": subevent_choices,
         }
+        self._resource_choices_cache = cache
+        return cache
 
     def _default_initials(
         self, choices: dict[str, object]
@@ -103,16 +217,11 @@ class WaitlistManagerFormsMixin:
         """
         import_initial = {}
         randomize_initial = {}
-        for field, choice_key in (
-            ("membership_type", "membership_type_choices"),
-            ("question", "question_choices"),
-        ):
-            if choices[choice_key]:
-                import_initial[field] = choices[choice_key][0][0]
-        answer_choices_by_question = choices["answer_choices_by_question"]
-        selected_question = import_initial.get("question")
-        if selected_question and answer_choices_by_question.get(selected_question):
-            import_initial["answer"] = answer_choices_by_question[selected_question][0][0]
+        membership_type_choices = choices["membership_type_choices"]
+        if membership_type_choices:
+            import_initial["membership_type"] = membership_type_choices[0][0]
+        import_initial["question"] = ""
+        import_initial["answer"] = ""
         for field in ("target", "subevent"):
             choice_key = f"{field}_choices"
             if choices[choice_key]:
@@ -132,13 +241,25 @@ class WaitlistManagerFormsMixin:
             A configured `WaitlistImportForm`.
         """
         choices = self._resource_choices()
+        membership_type_id = self._selected_value(
+            field="membership_type",
+            data=data,
+            initial=initial,
+            choices=choices["membership_type_choices"],
+            prefix="import",
+        )
+        question_choices, answer_choices_by_question = self._import_question_choices(
+            self.request.organizer,
+            self.request.event,
+            membership_type_id,
+        )
         return WaitlistImportForm(
             data=data,
             prefix="import",
             initial=initial,
             membership_type_choices=choices["membership_type_choices"],
-            question_choices=choices["question_choices"],
-            answer_choices_by_question=choices["answer_choices_by_question"],
+            question_choices=question_choices,
+            answer_choices_by_question=answer_choices_by_question,
             target_choices=choices["target_choices"],
             subevent_choices=choices["subevent_choices"],
         )
@@ -153,13 +274,32 @@ class WaitlistManagerFormsMixin:
             A configured `WaitlistRandomizeForm`.
         """
         choices = self._resource_choices()
+        target_value = self._selected_value(
+            field="target",
+            data=data,
+            initial=initial,
+            choices=choices["target_choices"],
+            prefix="randomize",
+        )
+        subevent_value = self._selected_value(
+            field="subevent",
+            data=data,
+            initial=initial,
+            choices=choices["subevent_choices"],
+            prefix="randomize",
+        )
         return WaitlistRandomizeForm(
             data=data,
             prefix="randomize",
             initial=initial,
             target_choices=choices["target_choices"],
             subevent_choices=choices["subevent_choices"],
-            group_question_choices=choices["group_question_choices"],
+            group_question_choices=self._randomize_group_question_choices(
+                self.request.organizer,
+                self.request.event,
+                target_value,
+                subevent_value if self.request.event.has_subevents else "",
+            ),
         )
 
     def _optional_int(self, value: str | None) -> int | None:
@@ -186,8 +326,8 @@ class WaitlistManagerFormsMixin:
             organizer=self.request.organizer,
             event=self.request.event,
             membership_type_id=int(form.cleaned_data["membership_type"]),
-            question_id=int(form.cleaned_data["question"]),
-            option_id=int(form.cleaned_data["answer"]),
+            question_id=self._optional_int(form.cleaned_data.get("question")),
+            option_id=self._optional_int(form.cleaned_data.get("answer")),
             target=target,
             subevent_id=self._optional_int(form.cleaned_data.get("subevent")),
             include_testmode=form.cleaned_data["include_testmode"],
@@ -314,9 +454,10 @@ class WaitlistManagerFormsMixin:
         context = {
             "import_form": import_form,
             "randomize_form": randomize_form,
-            "import_answer_choices_by_question": choices["answer_choices_by_question"],
             "import_preview_url": self._plugin_url("import_preview"),
+            "import_options_url": self._plugin_url("import_options"),
             "randomize_preview_url": self._plugin_url("randomize_preview"),
+            "randomize_options_url": self._plugin_url("randomize_options"),
             "import_action_url": self._plugin_url("run_import"),
             "randomize_action_url": self._plugin_url("run_randomize"),
         }
@@ -373,6 +514,65 @@ class WaitlistRandomizePageView(WaitlistManagerPageView):
     """Render the full randomize page."""
 
     template_name = "pretix_waitlist_manager/randomize_page.html"
+
+
+class WaitlistImportOptionsView(
+    EventPermissionRequiredMixin, WaitlistManagerFormsMixin, View
+):
+    """Return import question and answer choices for one membership type."""
+
+    permission = "event.orders:read"
+
+    def get(self, request, *args, **kwargs):
+        """Render import options as JSON for asynchronous select loading.
+
+        Args:
+            request: The incoming Django request.
+            *args: Unused view positional arguments.
+            **kwargs: Unused view keyword arguments.
+        Returns:
+            A `JsonResponse` containing question and answer choices.
+        """
+        membership_type_id = request.GET.get("membership_type")
+        question_choices, answer_choices_by_question = self._import_question_choices(
+            request.organizer,
+            request.event,
+            membership_type_id,
+        )
+        return JsonResponse(
+            {
+                "question_choices": question_choices,
+                "answer_choices_by_question": answer_choices_by_question,
+            }
+        )
+
+
+class WaitlistRandomizeOptionsView(
+    EventPermissionRequiredMixin, WaitlistManagerFormsMixin, View
+):
+    """Return randomize group-question choices for one waitlist selection."""
+
+    permission = "event.orders:read"
+
+    def get(self, request, *args, **kwargs):
+        """Render randomize group-question choices as JSON.
+
+        Args:
+            request: The incoming Django request.
+            *args: Unused view positional arguments.
+            **kwargs: Unused view keyword arguments.
+        Returns:
+            A `JsonResponse` containing group-question choices.
+        """
+        target_value = request.GET.get("target")
+        subevent_value = request.GET.get("subevent")
+        choices = self._randomize_group_question_choices(
+            request.organizer,
+            request.event,
+            target_value,
+            subevent_value if request.event.has_subevents else "",
+        )
+        return JsonResponse({"group_question_choices": choices})
 
 
 class WaitlistManagerActionView(EventPermissionRequiredMixin, WaitlistManagerFormsMixin, View):
@@ -602,8 +802,8 @@ class WaitlistImportPreviewView(WaitlistManagerPreviewView):
                 organizer=request.organizer,
                 event=request.event,
                 membership_type_id=int(form.cleaned_data["membership_type"]),
-                question_id=int(form.cleaned_data["question"]),
-                option_id=int(form.cleaned_data["answer"]),
+                question_id=self._optional_int(form.cleaned_data.get("question")),
+                option_id=self._optional_int(form.cleaned_data.get("answer")),
                 target=parse_target_choice(form.cleaned_data["target"]),
                 subevent_id=self._optional_int(form.cleaned_data.get("subevent")),
                 include_testmode=form.cleaned_data["include_testmode"],

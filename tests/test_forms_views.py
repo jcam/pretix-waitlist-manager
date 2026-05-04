@@ -17,10 +17,12 @@ from pretix_waitlist_manager.service_types import (
 from pretix_waitlist_manager.views import (
     SECTION_IMPORT,
     SECTION_RANDOMIZE,
+    WaitlistImportOptionsView,
     WaitlistImportPreviewView,
     WaitlistImportRunView,
     WaitlistManagerFormsMixin,
     WaitlistManagerView,
+    WaitlistRandomizeOptionsView,
     WaitlistRandomizePreviewView,
     WaitlistRandomizeRunView,
 )
@@ -66,7 +68,16 @@ class DummyProvider:
     def list_membership_types(self, organizer):
         return [{"id": 7, "name": {"en": "Gold"}}]
 
-    def list_questions(self, event):
+    def list_memberships(
+        self, organizer, membership_type_id, valid_for, include_testmode=False
+    ):
+        assert membership_type_id == 7
+        return [{"customer": {"identifier": "CUST1"}}]
+
+    def list_answered_import_questions(self, organizer, event, customer_ids):
+        if not customer_ids:
+            return []
+        assert customer_ids == ["CUST1"]
         return [
             {
                 "id": 10,
@@ -79,6 +90,9 @@ class DummyProvider:
     def list_group_questions(self, event):
         return [{"id": 42, "question": {"en": "Group emails"}}]
 
+    def list_answered_group_questions(self, organizer, event, emails):
+        return [{"id": 42, "question": {"en": "Group emails"}}] if emails else []
+
     def list_waitlist_items(self, event):
         return [SimpleNamespace(id=5, name={"en": "Target"}, has_variations=False)]
 
@@ -88,31 +102,100 @@ class DummyProvider:
     def list_variations(self, item):
         return []
 
+    def list_waiting_list_entries(self, organizer, event, item, variation=None, subevent=None):
+        return [SimpleNamespace(email="wait@example.org")]
+
+
+class MultiMembershipDummyProvider(DummyProvider):
+    def list_membership_types(self, organizer):
+        return [
+            {"id": 7, "name": {"en": "Gold"}},
+            {"id": 8, "name": {"en": "Prereg"}},
+        ]
+
+    def list_memberships(
+        self, organizer, membership_type_id, valid_for, include_testmode=False
+    ):
+        if membership_type_id == 8:
+            return [{"customer": {"identifier": "CUST1"}}]
+        return []
+
 
 def test_import_form_without_subevents_uses_placeholder():
     form = WaitlistImportForm(
         membership_type_choices=[("7", "Gold")],
-        question_choices=[("10", "Meal")],
-        answer_choices_by_question={"10": [("21", "Vegan")]},
+        question_choices_by_membership={"7": [("10", "Meal")]},
+        answer_choices_by_membership={"7": {"10": [("21", "Vegan")]}},
         target_choices=[("5:", "Target")],
         subevent_choices=[],
     )
 
     assert form.fields["subevent"].required is False
     assert form.fields["subevent"].choices == [("", "This event has no subevents")]
-    assert form.fields["answer"].choices == [("21", "Vegan")]
+    assert form.fields["question"].choices == [("", "No question filter"), ("10", "Meal")]
+    assert form.fields["answer"].choices == [("", "No answer filter")]
+
+
+def test_import_form_uses_selected_membership_question_choices():
+    form = WaitlistImportForm(
+        data={
+            "import-membership_type": "8",
+            "import-question": "20",
+            "import-answer": "30",
+        },
+        prefix="import",
+        membership_type_choices=[("7", "Gold"), ("8", "Silver")],
+        question_choices_by_membership={
+            "7": [("10", "Meal")],
+            "8": [("20", "Shirt size")],
+        },
+        answer_choices_by_membership={
+            "7": {"10": [("21", "Vegan")]},
+            "8": {"20": [("30", "Large")]},
+        },
+        target_choices=[("5:", "Target")],
+        subevent_choices=[],
+    )
+
+    assert form.fields["question"].choices == [
+        ("", "No question filter"),
+        ("20", "Shirt size"),
+    ]
+    assert form.fields["answer"].choices == [("", "No answer filter"), ("30", "Large")]
 
 
 def test_randomize_form_with_subevents_requires_selection():
     form = WaitlistRandomizeForm(
         target_choices=[("5:", "Target")],
         subevent_choices=[("11", "Morning")],
-        group_question_choices=[("", "No group question"), ("42", "Group emails")],
+        group_question_choices_by_selection={
+            "5:|11": [("", "No group question"), ("42", "Group emails")]
+        },
     )
 
     assert form.fields["subevent"].required is True
     assert form.fields["subevent"].choices == [("11", "Morning")]
     assert form.fields["group_question"].choices[1] == ("42", "Group emails")
+    assert form.fields["seed"].widget.attrs["data-ays-ignore"] == "1"
+
+
+def test_randomize_form_uses_selected_waitlist_group_questions():
+    form = WaitlistRandomizeForm(
+        data={
+            "randomize-target": "6:",
+            "randomize-subevent": "",
+            "randomize-group_question": "99",
+        },
+        prefix="randomize",
+        target_choices=[("5:", "Target"), ("6:", "Other target")],
+        subevent_choices=[],
+        group_question_choices_by_selection={
+            "5:|": [("", "No group question"), ("42", "Group emails")],
+            "6:|": [("", "No group question"), ("99", "Cabin roster")],
+        },
+    )
+
+    assert form.fields["group_question"].choices[1] == ("99", "Cabin roster")
 
 
 def test_waitlist_manager_redirect_points_to_import_tab():
@@ -120,6 +203,23 @@ def test_waitlist_manager_redirect_points_to_import_tab():
     view.request = _request()
 
     assert view.get_redirect_url().endswith("/control/event/demo/preview/waitlist-manager/import/")
+
+
+def test_default_initials_choose_first_membership_with_questions(monkeypatch):
+    request = _request()
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.PretixDataProvider", MultiMembershipDummyProvider
+    )
+
+    view = WaitlistImportPreviewView()
+    view.request = request
+    choices = view._resource_choices()
+    import_initial, randomize_initial = view._default_initials(choices)
+
+    assert import_initial["membership_type"] == "7"
+    assert import_initial["question"] == ""
+    assert import_initial["answer"] == ""
+    assert randomize_initial["target"] == "5:"
 
 
 def test_import_run_view_dry_run_redirects_and_reports(monkeypatch):
@@ -164,7 +264,52 @@ def test_import_run_view_dry_run_redirects_and_reports(monkeypatch):
     assert response.status_code == 302
     assert response["Location"].endswith("/control/event/demo/preview/waitlist-manager/import/")
     assert calls["kwargs"]["dry_run"] is True
+    assert calls["kwargs"]["question_id"] == 10
+    assert calls["kwargs"]["option_id"] == 21
     assert messages == [("info", "Dry run completed. No waitlist entries were created.")]
+
+
+def test_import_run_view_accepts_blank_question_filter(monkeypatch):
+    request = _request(
+        method="post",
+        data={
+            "import-membership_type": "7",
+            "import-question": "",
+            "import-answer": "",
+            "import-target": "5:",
+            "import-subevent": "",
+            "import-dry_run": "on",
+        },
+    )
+    calls = {}
+
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.PretixDataProvider", DummyProvider
+    )
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.messages.info",
+        lambda request, message: None,
+    )
+
+    class DummyImporter:
+        def __init__(self, provider):
+            calls["provider"] = provider
+
+        def run(self, **kwargs):
+            calls["kwargs"] = kwargs
+            return ImportResult(1, 1, 1, 0, 0, [])
+
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.WaitlistMembershipImporter", DummyImporter
+    )
+
+    view = WaitlistImportRunView()
+    view.request = request
+    response = view.post(request)
+
+    assert response.status_code == 302
+    assert calls["kwargs"]["question_id"] is None
+    assert calls["kwargs"]["option_id"] is None
 
 
 def test_randomize_run_view_redirects_and_reports(monkeypatch):
@@ -281,6 +426,69 @@ def test_import_preview_view_returns_html_and_uses_page_params(monkeypatch):
     assert "Page 2 of 2" in payload["html"]
 
 
+def test_import_preview_view_accepts_blank_question_filter(monkeypatch):
+    request = _request(
+        data={
+            "import-membership_type": "7",
+            "import-question": "",
+            "import-answer": "",
+            "import-target": "5:",
+            "import-subevent": "",
+        }
+    )
+    calls = {}
+
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.PretixDataProvider", DummyProvider
+    )
+
+    class DummyImporter:
+        def __init__(self, provider):
+            calls["provider"] = provider
+
+        def preview(self, **kwargs):
+            calls["kwargs"] = kwargs
+            return ImportPreviewResult(
+                import_page=_preview_page([]),
+                current_waitlist_page=_preview_page([]),
+            )
+
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.WaitlistMembershipImporter", DummyImporter
+    )
+
+    view = WaitlistImportPreviewView()
+    view.request = request
+    response = view.get(request)
+    payload = _json(response)
+
+    assert response.status_code == 200
+    assert calls["kwargs"]["question_id"] is None
+    assert calls["kwargs"]["option_id"] is None
+    assert "No matching customers for the current selection." in payload["html"]
+
+
+def test_import_options_view_returns_membership_scoped_choices(monkeypatch):
+    request = _request(
+        path="/control/event/demo/preview/waitlist-manager/import-options",
+        data={"membership_type": "7"},
+    )
+
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.PretixDataProvider", DummyProvider
+    )
+
+    view = WaitlistImportOptionsView()
+    view.request = request
+    payload = _json(view.get(request))
+
+    assert payload["question_choices"] == [["", "No question filter"], ["10", "Meal"]]
+    assert payload["answer_choices_by_question"] == {
+        "": [["", "No answer filter"]],
+        "10": [["", "No answer filter"], ["21", "Vegan"]],
+    }
+
+
 def test_randomize_preview_view_returns_error_for_invalid_form(monkeypatch):
     request = _request(
         data={
@@ -374,6 +582,28 @@ def test_randomize_preview_view_returns_seed_and_page_params(monkeypatch):
     assert payload["seed"] == 987
     assert "Preview seed: 987" in payload["html"]
     assert "Registered" in payload["html"]
+
+
+def test_randomize_options_view_returns_selection_scoped_group_questions(monkeypatch):
+    request = _request(
+        path="/control/event/demo/preview/waitlist-manager/randomize-options",
+        data={"target": "5:", "subevent": ""},
+    )
+
+    monkeypatch.setattr(
+        "pretix_waitlist_manager.views.PretixDataProvider", DummyProvider
+    )
+
+    view = WaitlistRandomizeOptionsView()
+    view.request = request
+    payload = _json(view.get(request))
+
+    assert payload["group_question_choices"] == [
+        ["", "No group question"],
+        ["42", "Group emails"],
+    ]
+
+
 def test_patch_event_navigation_moves_waitinglist_out_of_orders(monkeypatch):
     import pretix.control.context as context_module
     import pretix.control.navigation as navigation_module

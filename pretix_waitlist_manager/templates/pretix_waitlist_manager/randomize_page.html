@@ -25,6 +25,10 @@
                 id="waitlist-randomize-preview"
                 data-form-id="waitlist-randomize-form"
                 data-preview-url="{{ randomize_preview_url }}"
+                data-options-url="{{ randomize_options_url }}"
+                data-target-field-id="id_randomize-target"
+                data-subevent-field-id="id_randomize-subevent"
+                data-group-question-field-id="id_randomize-group_question"
                 data-seed-field-id="id_randomize-seed"
                 data-preview-error-message="{% trans "Preview could not be loaded." %}">
                 {% include "pretix_waitlist_manager/randomize_preview.html" %}

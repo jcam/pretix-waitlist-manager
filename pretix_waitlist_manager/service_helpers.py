@@ -101,7 +101,7 @@ def build_question_choices(questions: list[Any]) -> list[tuple[str, str]]:
     Returns:
         A list of `(value, label)` tuples for Django choice fields.
     """
-    choices: list[tuple[str, str]] = []
+    choices: list[tuple[str, str]] = [("", "No question filter")]
     for question in questions:
         if value(question, "type") not in {
             Question.TYPE_CHOICE,
@@ -128,7 +128,9 @@ def build_question_answer_choices(
     Returns:
         A mapping of question id strings to `(value, label)` answer choices.
     """
-    choices_by_question: dict[str, list[tuple[str, str]]] = {}
+    choices_by_question: dict[str, list[tuple[str, str]]] = {
+        "": [("", "No answer filter")]
+    }
     for question in questions:
         question_id = str(value(question, "id"))
         if value(question, "type") not in {
@@ -138,7 +140,7 @@ def build_question_answer_choices(
             "M",
         }:
             continue
-        choices_by_question[question_id] = [
+        choices_by_question[question_id] = [("", "No answer filter")] + [
             (
                 str(value(option, "id")),
                 localized_label(
