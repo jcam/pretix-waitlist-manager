@@ -263,13 +263,48 @@ def build_waitlist_rows(
     return [
         WaitlistRow(
             email=value(entry, "email") or None,
-            name=value(entry, "name") or None,
+            name=value(entry, "name_cached") or value(entry, "name") or None,
             locale=value(entry, "locale") or None,
             priority=int(assignments.get(entry.pk, value(entry, "priority", 0)) or 0),
             created=value(entry, "created"),
         )
         for entry in entries
     ]
+
+
+def build_preview_page(
+    rows: list[Any],
+    total: int,
+    page: int,
+    per_page: int,
+) -> PreviewPage:
+    """Construct preview pagination metadata for a pre-sliced row list.
+
+    Args:
+        rows: Rows already limited to the requested page.
+        total: Total row count across all pages.
+        page: 1-based page number requested by the caller.
+        per_page: Number of rows intended per page.
+    Returns:
+        A `PreviewPage` for templates and preview JSON payloads.
+    """
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(max(page, 1), pages)
+    start_index = (page - 1) * per_page
+    end_index = min(start_index + len(rows), total)
+    return PreviewPage(
+        rows=rows,
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages,
+        start=start_index + 1 if total else 0,
+        end=end_index,
+        has_previous=page > 1,
+        has_next=page < pages,
+        previous_page=page - 1 if page > 1 else None,
+        next_page=page + 1 if page < pages else None,
+    )
 
 
 def paginate_rows(rows: list[Any], page: int, per_page: int) -> PreviewPage:
@@ -287,16 +322,4 @@ def paginate_rows(rows: list[Any], page: int, per_page: int) -> PreviewPage:
     page = min(max(page, 1), pages)
     start_index = (page - 1) * per_page
     end_index = min(start_index + per_page, total)
-    return PreviewPage(
-        rows=rows[start_index:end_index],
-        total=total,
-        page=page,
-        per_page=per_page,
-        pages=pages,
-        start=start_index + 1 if total else 0,
-        end=end_index,
-        has_previous=page > 1,
-        has_next=page < pages,
-        previous_page=page - 1 if page > 1 else None,
-        next_page=page + 1 if page < pages else None,
-    )
+    return build_preview_page(rows[start_index:end_index], total, page, per_page)

@@ -5,6 +5,7 @@ from django.test import RequestFactory
 
 from pretix_waitlist_manager.navigation import patch_event_navigation
 from pretix_waitlist_manager.forms import WaitlistImportForm, WaitlistRandomizeForm
+from pretix_waitlist_manager.service_helpers import build_preview_page
 from pretix_waitlist_manager.service_types import (
     ImportPreviewResult,
     ImportResult,
@@ -104,6 +105,16 @@ class DummyProvider:
 
     def list_waiting_list_entries(self, organizer, event, item, variation=None, subevent=None):
         return [SimpleNamespace(email="wait@example.org")]
+
+    def count_waiting_list_entries(self, organizer, event, item, variation=None, subevent=None):
+        return 1
+
+    def list_waiting_list_entry_emails(self, organizer, event, item, variation=None, subevent=None):
+        return {"wait@example.org"}
+
+    def waiting_list_preview_page(self, organizer, event, item, variation=None, subevent=None, page=1, per_page=10):
+        rows = [WaitlistRow(name="Queued", email="wait@example.org", locale="en", priority=0, created="2026-05-01 12:00")]
+        return build_preview_page(rows, 1, page, per_page)
 
 
 class MultiMembershipDummyProvider(DummyProvider):
@@ -422,6 +433,8 @@ def test_import_preview_view_returns_html_and_uses_page_params(monkeypatch):
     assert response.status_code == 200
     assert calls["kwargs"]["import_page"] == 2
     assert calls["kwargs"]["current_waitlist_page"] == 3
+    assert payload["question_choices"] == [["", "No question filter"], ["10", "Meal"]]
+    assert payload["answer_choices_by_question"]["10"] == [["", "No answer filter"], ["21", "Vegan"]]
     assert "Customer One" in payload["html"]
     assert "Page 2 of 2" in payload["html"]
 
@@ -465,6 +478,7 @@ def test_import_preview_view_accepts_blank_question_filter(monkeypatch):
     assert response.status_code == 200
     assert calls["kwargs"]["question_id"] is None
     assert calls["kwargs"]["option_id"] is None
+    assert payload["question_choices"] == [["", "No question filter"], ["10", "Meal"]]
     assert "No matching customers for the current selection." in payload["html"]
 
 
@@ -506,6 +520,7 @@ def test_randomize_preview_view_returns_error_for_invalid_form(monkeypatch):
 
     assert response.status_code == 200
     assert payload["seed"] is None
+    assert "group_question_choices" not in payload
     assert "Preview could not be loaded for the current selection." in payload["html"]
 
 
@@ -580,6 +595,10 @@ def test_randomize_preview_view_returns_seed_and_page_params(monkeypatch):
     assert calls["kwargs"]["before_page"] == 2
     assert calls["kwargs"]["after_page"] == 4
     assert payload["seed"] == 987
+    assert payload["group_question_choices"] == [
+        ["", "No group question"],
+        ["42", "Group emails"],
+    ]
     assert "Preview seed: 987" in payload["html"]
     assert "Registered" in payload["html"]
 

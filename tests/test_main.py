@@ -112,10 +112,38 @@ class FakeProvider:
         assert subevent == 12
         return list(self.waitlist_entries)
 
-    def list_group_question_answers(self, organizer, event, question_id):
+    def count_waiting_list_entries(self, organizer, event, item, variation=None, subevent=None):
+        return len(self.list_waiting_list_entries(organizer, event, item, variation, subevent))
+
+    def list_waiting_list_entry_emails(self, organizer, event, item, variation=None, subevent=None):
+        return {
+            entry.email.strip().lower()
+            for entry in self.list_waiting_list_entries(organizer, event, item, variation, subevent)
+            if entry.email
+        }
+
+    def waiting_list_preview_page(self, organizer, event, item, variation=None, subevent=None, page=1, per_page=10):
+        entries = self.list_waiting_list_entries(organizer, event, item, variation, subevent)
+        start_index = (page - 1) * per_page
+        end_index = start_index + per_page
+        rows = [
+            SimpleNamespace(
+                email=entry.email,
+                name=entry.name,
+                locale=entry.locale,
+                priority=entry.priority,
+                created=entry.created,
+            )
+            for entry in entries[start_index:end_index]
+        ]
+        from pretix_waitlist_manager.service_helpers import build_preview_page
+        return build_preview_page(rows, len(entries), page, per_page)
+
+    def list_group_question_answers(self, organizer, event, question_id, emails=None):
         assert organizer == "orga"
         assert event == "ev"
         assert question_id == 42
+        assert emails == ["friend@example.org", "two@example.org", "wait@example.org"]
         return [
             SimpleNamespace(
                 answer="friend@example.org",

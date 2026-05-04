@@ -124,117 +124,81 @@
         }
     }
 
-    function fetchJson(url, params) {
+    const jsonCache = new Map();
+
+    function cacheKey(url, params) {
         const search = new URLSearchParams(params);
-        return fetch(`${url}?${search.toString()}`, {
+        return `${url}?${search.toString()}`;
+    }
+
+    function fetchJson(url, params, useCache = true) {
+        const key = cacheKey(url, params);
+        if (useCache && jsonCache.has(key)) {
+            return Promise.resolve(jsonCache.get(key));
+        }
+
+        return fetch(key, {
             headers: {
                 "X-Requested-With": "XMLHttpRequest"
             }
-        }).then((response) => response.json());
+        }).then((response) => response.json()).then((payload) => {
+            if (useCache) {
+                jsonCache.set(key, payload);
+            }
+            return payload;
+        });
     }
 
-    function initializeDependentImportSelects(preview) {
+    function clearPreviewCache() {
+        jsonCache.clear();
+    }
+
+    function applyImportChoices(preview, form, payload) {
         const formId = preview.dataset.formId;
-        const optionsUrl = preview.dataset.optionsUrl;
-        const membershipFieldId = preview.dataset.membershipFieldId;
         const questionFieldId = preview.dataset.questionFieldId;
         const answerFieldId = preview.dataset.answerFieldId;
-        if (!formId || !optionsUrl || !membershipFieldId || !questionFieldId || !answerFieldId) {
-            return Promise.resolve();
+        if (!formId || !questionFieldId || !answerFieldId) {
+            return;
         }
 
-        const form = document.getElementById(formId);
-        const membershipField = document.getElementById(membershipFieldId);
         const questionField = document.getElementById(questionFieldId);
         const answerField = document.getElementById(answerFieldId);
-        if (!form || !membershipField || !questionField || !answerField) {
-            return Promise.resolve();
+        if (!form || !questionField || !answerField) {
+            return;
         }
 
-        const loadOptions = () => {
-            return fetchJson(optionsUrl, {
-                membership_type: membershipField.value
-            }).then((payload) => {
-                const questionChoices = payload.question_choices || [];
-                const answerChoicesByQuestion = payload.answer_choices_by_question || {};
-                const currentQuestion = preferredStoredValue(form, questionField);
-                const currentAnswer = preferredStoredValue(form, answerField);
+        if (!payload.question_choices || !payload.answer_choices_by_question) {
+            return;
+        }
 
-                setSelectChoices(questionField, questionChoices, currentQuestion);
-                setSelectChoices(
-                    answerField,
-                    answerChoicesByQuestion[questionField.value] || [],
-                    currentAnswer
-                );
-                saveFormState(form);
-            });
-        };
-
-        questionField.addEventListener("change", (event) => {
-            event.stopImmediatePropagation();
-            loadOptions().then(() => {
-                answerField.dispatchEvent(new Event("change", {bubbles: true}));
-            });
-        });
-
-        membershipField.addEventListener("change", (event) => {
-            event.stopImmediatePropagation();
-            loadOptions().then(() => {
-                answerField.dispatchEvent(new Event("change", {bubbles: true}));
-            });
-        });
-
-        return loadOptions().catch(() => {
-            questionField.innerHTML = "";
-            answerField.innerHTML = "";
-            saveFormState(form);
-        });
+        const currentQuestion = preferredStoredValue(form, questionField);
+        const currentAnswer = preferredStoredValue(form, answerField);
+        setSelectChoices(questionField, payload.question_choices, currentQuestion);
+        setSelectChoices(
+            answerField,
+            payload.answer_choices_by_question[questionField.value]
+                || payload.answer_choices_by_question[""]
+                || [["", "No answer filter"]],
+            currentAnswer
+        );
+        saveFormState(form);
     }
 
-    function initializeDependentRandomizeSelects(preview) {
+    function applyRandomizeChoices(preview, form, payload) {
         const formId = preview.dataset.formId;
-        const optionsUrl = preview.dataset.optionsUrl;
-        const targetFieldId = preview.dataset.targetFieldId;
-        const subeventFieldId = preview.dataset.subeventFieldId;
         const groupQuestionFieldId = preview.dataset.groupQuestionFieldId;
-        if (!formId || !optionsUrl || !targetFieldId || !subeventFieldId || !groupQuestionFieldId) {
-            return Promise.resolve();
+        if (!formId || !groupQuestionFieldId) {
+            return;
         }
 
-        const form = document.getElementById(formId);
-        const targetField = document.getElementById(targetFieldId);
-        const subeventField = document.getElementById(subeventFieldId);
         const groupQuestionField = document.getElementById(groupQuestionFieldId);
-        if (!form || !targetField || !subeventField || !groupQuestionField) {
-            return Promise.resolve();
+        if (!form || !groupQuestionField || !payload.group_question_choices) {
+            return;
         }
 
-        const loadOptions = () => {
-            return fetchJson(optionsUrl, {
-                target: targetField.value,
-                subevent: subeventField.value || ""
-            }).then((payload) => {
-                const choices = payload.group_question_choices || [["", "No group question"]];
-                const currentValue = preferredStoredValue(form, groupQuestionField);
-                setSelectChoices(groupQuestionField, choices, currentValue);
-                saveFormState(form);
-            });
-        };
-
-        const updateGroupQuestionChoices = (event) => {
-            event.stopImmediatePropagation();
-            loadOptions().then(() => {
-                groupQuestionField.dispatchEvent(new Event("change", {bubbles: true}));
-            });
-        };
-
-        targetField.addEventListener("change", updateGroupQuestionChoices);
-        subeventField.addEventListener("change", updateGroupQuestionChoices);
-
-        return loadOptions().catch(() => {
-            setSelectChoices(groupQuestionField, [["", "No group question"]], "");
-            saveFormState(form);
-        });
+        const currentValue = preferredStoredValue(form, groupQuestionField);
+        setSelectChoices(groupQuestionField, payload.group_question_choices, currentValue);
+        saveFormState(form);
     }
 
     function initializePreview(preview) {
@@ -247,6 +211,7 @@
         if (!form || !previewUrl) {
             return;
         }
+        form.addEventListener("submit", clearPreviewCache);
 
         let timer = null;
 
@@ -261,13 +226,10 @@
                 params.set(key, value);
             });
 
-            fetch(`${previewUrl}?${params.toString()}`, {
-                headers: {
-                    "X-Requested-With": "XMLHttpRequest"
-                }
-            })
-                .then((response) => response.json())
+            fetchJson(previewUrl, params)
                 .then((payload) => {
+                    applyImportChoices(preview, form, payload);
+                    applyRandomizeChoices(preview, form, payload);
                     preview.innerHTML = payload.html;
                     if (seedFieldId && payload.seed) {
                         const seedField = document.getElementById(seedFieldId);
@@ -321,12 +283,7 @@
         });
 
         document.querySelectorAll(".waitlist-manager-preview").forEach((preview) => {
-            Promise.all([
-                initializeDependentImportSelects(preview),
-                initializeDependentRandomizeSelects(preview)
-            ]).finally(() => {
-                initializePreview(preview);
-            });
+            initializePreview(preview);
         });
     }
 

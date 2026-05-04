@@ -14,6 +14,7 @@ from pretix.base.models import (
     SubEvent,
     WaitingListEntry,
 )
+from .service_helpers import build_preview_page, build_waitlist_rows
 
 
 class PretixDataProvider:
@@ -248,6 +249,7 @@ class PretixDataProvider:
         organizer,
         event,
         question_id: int,
+        emails: list[str] | None = None,
     ) -> list[QuestionAnswer]:
         """List non-empty answers for one grouping question.
 
@@ -255,19 +257,27 @@ class PretixDataProvider:
             organizer: Organizer owning the scoped query.
             event: Event whose answers should be searched.
             question_id: Group-question id to load answers for.
+            emails: Optional participant emails used to narrow the query.
         Returns:
             An ordered list of `QuestionAnswer` objects.
         """
+        if emails is not None and not emails:
+            return []
         with scope(organizer=organizer):
-            return list(
-                QuestionAnswer.objects.filter(
-                    question__event=event,
-                    question_id=question_id,
-                    orderposition__order__event=event,
-                    orderposition__canceled=False,
+            qs = QuestionAnswer.objects.filter(
+                question__event=event,
+                question_id=question_id,
+                orderposition__order__event=event,
+                orderposition__canceled=False,
+            ).exclude(answer="")
+            if emails:
+                qs = qs.filter(
+                    Q(orderposition__attendee_email__in=emails)
+                    | Q(orderposition__order__customer__email__in=emails)
+                    | Q(orderposition__order__email__in=emails)
                 )
-                .exclude(answer="")
-                .select_related("orderposition__order__customer", "orderposition__order")
+            return list(
+                qs.select_related("orderposition__order__customer", "orderposition__order")
                 .order_by("orderposition__order_id", "orderposition_id", "id")
             )
 
@@ -285,7 +295,9 @@ class PretixDataProvider:
                 Customer.objects.filter(
                     organizer=organizer,
                     identifier__in=customer_ids,
-                ).order_by("identifier")
+                )
+                .only("identifier", "email", "name_cached", "name_parts", "locale", "phone")
+                .order_by("identifier")
             )
 
     def list_waiting_list_entries(
@@ -309,13 +321,130 @@ class PretixDataProvider:
         """
         with scope(organizer=organizer):
             return list(
-                WaitingListEntry.objects.filter(
+                self._waiting_list_queryset(
                     event=event,
-                    item_id=item,
-                    variation_id=variation,
-                    subevent_id=subevent,
-                    voucher__isnull=True,
-                ).order_by("-priority", "created", "pk")
+                    item=item,
+                    variation=variation,
+                    subevent=subevent,
+                ).only(
+                    "pk",
+                    "email",
+                    "locale",
+                    "priority",
+                    "created",
+                    "name_cached",
+                    "name_parts",
+                )
+            )
+
+    def count_waiting_list_entries(
+        self,
+        organizer,
+        event,
+        item: int,
+        variation: int | None = None,
+        subevent: int | None = None,
+    ) -> int:
+        """Count voucher-less waiting-list entries for one target.
+
+        Args:
+            organizer: Organizer owning the scoped query.
+            event: Event whose waiting list should be counted.
+            item: Item id of the waitlist target.
+            variation: Optional variation id of the target.
+            subevent: Optional subevent id of the target.
+        Returns:
+            The total number of current waitlist entries for the target.
+        """
+        with scope(organizer=organizer):
+            return self._waiting_list_queryset(
+                event=event,
+                item=item,
+                variation=variation,
+                subevent=subevent,
+            ).count()
+
+    def list_waiting_list_entry_emails(
+        self,
+        organizer,
+        event,
+        item: int,
+        variation: int | None = None,
+        subevent: int | None = None,
+    ) -> set[str]:
+        """Load normalized emails for one waitlist target.
+
+        Args:
+            organizer: Organizer owning the scoped query.
+            event: Event whose waitlist should be searched.
+            item: Item id of the waitlist target.
+            variation: Optional variation id of the target.
+            subevent: Optional subevent id of the target.
+        Returns:
+            A set of normalized email addresses currently on the waitlist.
+        """
+        with scope(organizer=organizer):
+            return {
+                email.strip().lower()
+                for email in self._waiting_list_queryset(
+                    event=event,
+                    item=item,
+                    variation=variation,
+                    subevent=subevent,
+                )
+                .exclude(email="")
+                .values_list("email", flat=True)
+                if email
+            }
+
+    def waiting_list_preview_page(
+        self,
+        organizer,
+        event,
+        item: int,
+        variation: int | None = None,
+        subevent: int | None = None,
+        page: int = 1,
+        per_page: int = 10,
+    ):
+        """Load one paginated waiting-list preview page from the database.
+
+        Args:
+            organizer: Organizer owning the scoped query.
+            event: Event whose waiting list should be paginated.
+            item: Item id of the waitlist target.
+            variation: Optional variation id of the target.
+            subevent: Optional subevent id of the target.
+            page: 1-based page number to fetch.
+            per_page: Number of rows to include per page.
+        Returns:
+            A `PreviewPage` built from the paginated query results.
+        """
+        with scope(organizer=organizer):
+            qs = self._waiting_list_queryset(
+                event=event,
+                item=item,
+                variation=variation,
+                subevent=subevent,
+            ).only(
+                "pk",
+                "email",
+                "locale",
+                "priority",
+                "created",
+                "name_cached",
+                "name_parts",
+            )
+            total = qs.count()
+            pages = max(1, (total + per_page - 1) // per_page)
+            page = min(max(page, 1), pages)
+            start_index = (page - 1) * per_page
+            entries = list(qs[start_index:start_index + per_page])
+            return build_preview_page(
+                build_waitlist_rows(entries),
+                total,
+                page,
+                per_page,
             )
 
     def create_waiting_list_entry(
@@ -387,3 +516,29 @@ class PretixDataProvider:
                 )
                 updated += 1
         return updated
+
+    def _waiting_list_queryset(
+        self,
+        *,
+        event,
+        item: int,
+        variation: int | None,
+        subevent: int | None,
+    ):
+        """Build the base queryset for current waiting-list entries.
+
+        Args:
+            event: Event whose waiting list should be queried.
+            item: Item id of the waitlist target.
+            variation: Optional variation id of the target.
+            subevent: Optional subevent id of the target.
+        Returns:
+            An ordered queryset for voucher-less waiting-list entries.
+        """
+        return WaitingListEntry.objects.filter(
+            event=event,
+            item_id=item,
+            variation_id=variation,
+            subevent_id=subevent,
+            voucher__isnull=True,
+        ).order_by("-priority", "created", "pk")

@@ -158,7 +158,7 @@ class WaitlistManagerFormsMixin:
         )
         emails = sorted(
             {
-                (value(entry, "email") or "").strip().lower()
+                (value(entry, "email") or "").strip()
                 for entry in entries
                 if value(entry, "email")
             }
@@ -253,7 +253,7 @@ class WaitlistManagerFormsMixin:
             self.request.event,
             membership_type_id,
         )
-        return WaitlistImportForm(
+        form = WaitlistImportForm(
             data=data,
             prefix="import",
             initial=initial,
@@ -263,6 +263,9 @@ class WaitlistManagerFormsMixin:
             target_choices=choices["target_choices"],
             subevent_choices=choices["subevent_choices"],
         )
+        form.waitlist_manager_question_choices = question_choices
+        form.waitlist_manager_answer_choices_by_question = answer_choices_by_question
+        return form
 
     def get_randomize_form(self, data=None, initial=None):
         """Build the randomize form for GET or POST handling.
@@ -288,7 +291,7 @@ class WaitlistManagerFormsMixin:
             choices=choices["subevent_choices"],
             prefix="randomize",
         )
-        return WaitlistRandomizeForm(
+        form = WaitlistRandomizeForm(
             data=data,
             prefix="randomize",
             initial=initial,
@@ -301,6 +304,10 @@ class WaitlistManagerFormsMixin:
                 subevent_value if self.request.event.has_subevents else "",
             ),
         )
+        form.waitlist_manager_group_question_choices = list(
+            form.fields["group_question"].choices
+        )
+        return form
 
     def _optional_int(self, value: str | None) -> int | None:
         """Convert an optional form value to an integer.
@@ -768,8 +775,9 @@ class WaitlistManagerPreviewView(
             request=request,
         )
         response = {"html": html}
-        if self.include_seed:
-            response["seed"] = payload.get("seed")
+        response.update(payload)
+        if self.include_seed and "seed" not in response:
+            response["seed"] = None
         return JsonResponse(response)
 
 
@@ -811,7 +819,9 @@ class WaitlistImportPreviewView(WaitlistManagerPreviewView):
                 current_waitlist_page=_positive_int(
                     request.GET.get("current_waitlist_page")
                 ),
-            )
+            ),
+            "question_choices": list(form.waitlist_manager_question_choices),
+            "answer_choices_by_question": form.waitlist_manager_answer_choices_by_question,
         }
 
 
@@ -853,4 +863,8 @@ class WaitlistRandomizePreviewView(WaitlistManagerPreviewView):
             after_page=_positive_int(request.GET.get("after_page")),
             seed=form.cleaned_data.get("seed"),
         )
-        return {"preview": preview, "seed": preview.seed}
+        return {
+            "preview": preview,
+            "seed": preview.seed,
+            "group_question_choices": list(form.waitlist_manager_group_question_choices),
+        }

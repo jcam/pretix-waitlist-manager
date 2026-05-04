@@ -234,11 +234,19 @@ class WaitlistRandomizer:
         if not group_question_id:
             return {f"entry:{entry.pk}": [entry] for entry in eligible_entries}
 
+        eligible_emails = sorted(
+            {
+                entry.email.strip()
+                for entry in eligible_entries
+                if entry.email and entry.email.strip()
+            }
+        )
         root_by_email = self._group_roots(
             self.provider.list_group_question_answers(
                 organizer,
                 event,
                 group_question_id,
+                emails=eligible_emails,
             )
         )
         component_members: dict[str, list[WaitingListEntry]] = {}
