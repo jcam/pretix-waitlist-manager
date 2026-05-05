@@ -109,8 +109,11 @@ class DummyProvider:
     def count_waiting_list_entries(self, organizer, event, item, variation=None, subevent=None):
         return 1
 
-    def list_waiting_list_entry_emails(self, organizer, event, item, variation=None, subevent=None):
-        return {"wait@example.org"}
+    def waiting_list_import_statuses_by_email(self, organizer, event, item, variation=None, subevent=None):
+        return {"wait@example.org": "already_waiting"}
+
+    def customer_ids_with_paid_tickets(self, organizer, event, customer_ids):
+        return set()
 
     def waiting_list_preview_page(self, organizer, event, item, variation=None, subevent=None, page=1, per_page=10):
         rows = [WaitlistRow(name="Queued", email="wait@example.org", locale="en", priority=0, created="2026-05-01 12:00")]
@@ -144,6 +147,7 @@ def test_import_form_without_subevents_uses_placeholder():
     assert form.fields["subevent"].required is False
     assert form.fields["subevent"].choices == [("", "This event has no subevents")]
     assert form.fields["email"].required is False
+    assert form.fields["exclude_paid_tickets"].choices == [("yes", "Yes"), ("no", "No")]
     assert form.fields["question"].choices == [("", "No question filter"), ("10", "Meal")]
     assert form.fields["answer"].choices == [("", "No answer filter")]
 
@@ -152,8 +156,11 @@ def test_import_form_uses_selected_membership_question_choices():
     form = WaitlistImportForm(
         data={
             "import-membership_type": "8",
+            "import-email": "cust",
             "import-question": "20",
             "import-answer": "30",
+            "import-target": "5:",
+            "import-subevent": "",
         },
         prefix="import",
         membership_type_choices=[("7", "Gold"), ("8", "Silver")],
@@ -174,6 +181,7 @@ def test_import_form_uses_selected_membership_question_choices():
         ("20", "Shirt size"),
     ]
     assert form.fields["answer"].choices == [("", "No answer filter"), ("30", "Large")]
+    assert form.is_valid() is True
 
 
 def test_randomize_form_with_subevents_requires_selection():
@@ -239,11 +247,12 @@ def test_import_run_view_dry_run_redirects_and_reports(monkeypatch):
         method="post",
         data={
             "import-membership_type": "7",
-            "import-email": "one@example.org",
+            "import-email": "one@",
             "import-question": "10",
             "import-answer": "21",
             "import-target": "5:",
             "import-subevent": "",
+            "import-exclude_paid_tickets": "yes",
             "import-dry_run": "on",
         },
     )
@@ -277,7 +286,8 @@ def test_import_run_view_dry_run_redirects_and_reports(monkeypatch):
     assert response.status_code == 302
     assert response["Location"].endswith("/control/event/demo/preview/waitlist-manager/import/")
     assert calls["kwargs"]["dry_run"] is True
-    assert calls["kwargs"]["email_filter"] == "one@example.org"
+    assert calls["kwargs"]["email_filter"] == "one@"
+    assert calls["kwargs"]["exclude_paid_tickets"] is True
     assert calls["kwargs"]["question_id"] == 10
     assert calls["kwargs"]["option_id"] == 21
     assert messages == [("info", "Dry run completed. No waitlist entries were created.")]
@@ -293,6 +303,7 @@ def test_import_run_view_accepts_blank_question_filter(monkeypatch):
             "import-answer": "",
             "import-target": "5:",
             "import-subevent": "",
+            "import-exclude_paid_tickets": "no",
             "import-dry_run": "on",
         },
     )
@@ -324,6 +335,7 @@ def test_import_run_view_accepts_blank_question_filter(monkeypatch):
 
     assert response.status_code == 302
     assert calls["kwargs"]["email_filter"] == ""
+    assert calls["kwargs"]["exclude_paid_tickets"] is False
     assert calls["kwargs"]["question_id"] is None
     assert calls["kwargs"]["option_id"] is None
 
@@ -375,11 +387,12 @@ def test_import_preview_view_returns_html_and_uses_page_params(monkeypatch):
     request = _request(
         data={
             "import-membership_type": "7",
-            "import-email": "one@example.org",
+            "import-email": "one@",
             "import-question": "10",
             "import-answer": "21",
             "import-target": "5:",
             "import-subevent": "",
+            "import-exclude_paid_tickets": "yes",
             "import_page": "2",
             "current_waitlist_page": "3",
         }
@@ -437,7 +450,8 @@ def test_import_preview_view_returns_html_and_uses_page_params(monkeypatch):
     payload = _json(response)
 
     assert response.status_code == 200
-    assert calls["kwargs"]["email_filter"] == "one@example.org"
+    assert calls["kwargs"]["email_filter"] == "one@"
+    assert calls["kwargs"]["exclude_paid_tickets"] is True
     assert calls["kwargs"]["import_page"] == 2
     assert calls["kwargs"]["current_waitlist_page"] == 3
     assert payload["question_choices"] == [["", "No question filter"], ["10", "Meal"]]
@@ -455,6 +469,7 @@ def test_import_preview_view_accepts_blank_question_filter(monkeypatch):
             "import-answer": "",
             "import-target": "5:",
             "import-subevent": "",
+            "import-exclude_paid_tickets": "no",
         }
     )
     calls = {}
@@ -485,6 +500,7 @@ def test_import_preview_view_accepts_blank_question_filter(monkeypatch):
 
     assert response.status_code == 200
     assert calls["kwargs"]["email_filter"] == ""
+    assert calls["kwargs"]["exclude_paid_tickets"] is False
     assert calls["kwargs"]["question_id"] is None
     assert calls["kwargs"]["option_id"] is None
     assert payload["question_choices"] == [["", "No question filter"], ["10", "Meal"]]

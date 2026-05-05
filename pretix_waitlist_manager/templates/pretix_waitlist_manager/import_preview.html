@@ -30,6 +30,12 @@
                                             {% trans "Would add" %}
                                         {% elif row.status == "already_waiting" %}
                                             {% trans "Already on waitlist" %}
+                                        {% elif row.status == "voucher_assigned" %}
+                                            {% trans "Voucher already assigned" %}
+                                        {% elif row.status == "voucher_redeemed" %}
+                                            {% trans "Voucher already redeemed" %}
+                                        {% elif row.status == "has_paid_ticket" %}
+                                            {% trans "Already has paid ticket" %}
                                         {% elif row.status == "missing_email" %}
                                             {% trans "Missing email" %}
                                         {% else %}

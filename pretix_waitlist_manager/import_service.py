@@ -25,6 +25,7 @@ class WaitlistMembershipImporter:
         option_id: int | None,
         target: WaitlistTarget,
         subevent_id: int | None = None,
+        exclude_paid_tickets: bool = True,
         include_testmode: bool = False,
         dry_run: bool = True,
         user=None,
@@ -35,11 +36,12 @@ class WaitlistMembershipImporter:
             organizer: Organizer owning the data scope.
             event: Event whose waitlist is being updated.
             membership_type_id: Membership type used to select members.
-            email_filter: Optional exact email address used to narrow matches.
+            email_filter: Optional email substring used to narrow matches.
             question_id: Optional question whose answer filters members.
             option_id: Optional question option that must be selected.
             target: Selected waitlist item or variation.
             subevent_id: Optional subevent to scope the waitlist.
+            exclude_paid_tickets: Whether paid admission holders are excluded.
             include_testmode: Whether testmode memberships are eligible.
             dry_run: Whether to simulate without creating entries.
             user: User recorded in waitlist log actions.
@@ -62,12 +64,27 @@ class WaitlistMembershipImporter:
             option_id=option_id,
             include_testmode=include_testmode,
         )
-        existing_emails = self.provider.list_waiting_list_entry_emails(
+        existing_statuses_by_email = self.provider.waiting_list_import_statuses_by_email(
             organizer,
             event,
             item=target.item_id,
             variation=target.variation_id,
             subevent=subevent_id,
+        )
+        paid_ticket_customer_ids = (
+            self.provider.customer_ids_with_paid_tickets(
+                organizer,
+                event,
+                [
+                    customer_id
+                    for customer_id in (
+                        value(customer, "identifier") for customer in matched_customers
+                    )
+                    if customer_id
+                ],
+            )
+            if exclude_paid_tickets
+            else set()
         )
         existing_waitlist_entries = self.provider.count_waiting_list_entries(
             organizer,
@@ -86,24 +103,15 @@ class WaitlistMembershipImporter:
             status = self._import_status(
                 email=email,
                 lowered_email=lowered_email,
-                existing_emails=existing_emails,
+                existing_statuses_by_email=existing_statuses_by_email,
+                customer_id=customer_id,
+                paid_ticket_customer_ids=paid_ticket_customer_ids,
             )
-            if status == "missing_email":
+            if status != "would_add":
                 rows.append(
                     ImportRow(
                         customer=customer_id,
-                        email=None,
-                        name=name,
-                        locale=locale,
-                        status=status,
-                    )
-                )
-                continue
-            if status == "already_waiting":
-                rows.append(
-                    ImportRow(
-                        customer=customer_id,
-                        email=email,
+                        email=email if status != "missing_email" else None,
                         name=name,
                         locale=locale,
                         status=status,
@@ -127,7 +135,7 @@ class WaitlistMembershipImporter:
                 self.provider.create_waiting_list_entry(
                     organizer, event, payload, user=user
                 )
-                existing_emails.add(lowered_email)
+                existing_statuses_by_email[lowered_email] = "already_waiting"
                 added_count += 1
                 status = "added"
             else:
@@ -196,6 +204,7 @@ class WaitlistMembershipImporter:
         option_id: int | None,
         target: WaitlistTarget,
         subevent_id: int | None = None,
+        exclude_paid_tickets: bool = True,
         include_testmode: bool = False,
         sample_size: int = 10,
         import_page: int = 1,
@@ -207,11 +216,12 @@ class WaitlistMembershipImporter:
             organizer: Organizer owning the data scope.
             event: Event whose waitlist is being previewed.
             membership_type_id: Membership type used to select members.
-            email_filter: Optional exact email address used to narrow matches.
+            email_filter: Optional email substring used to narrow matches.
             question_id: Optional question whose answer filters members.
             option_id: Optional question option that must be selected.
             target: Selected waitlist item or variation.
             subevent_id: Optional subevent to scope the waitlist.
+            exclude_paid_tickets: Whether paid admission holders are excluded.
             include_testmode: Whether testmode memberships are eligible.
             sample_size: Rows shown per preview page.
             import_page: Requested page for candidate import rows.
@@ -235,12 +245,27 @@ class WaitlistMembershipImporter:
             option_id=option_id,
             include_testmode=include_testmode,
         )
-        existing_emails = self.provider.list_waiting_list_entry_emails(
+        existing_statuses_by_email = self.provider.waiting_list_import_statuses_by_email(
             organizer,
             event,
             item=target.item_id,
             variation=target.variation_id,
             subevent=subevent_id,
+        )
+        paid_ticket_customer_ids = (
+            self.provider.customer_ids_with_paid_tickets(
+                organizer,
+                event,
+                [
+                    customer_id
+                    for customer_id in (
+                        value(customer, "identifier") for customer in matched_customers
+                    )
+                    if customer_id
+                ],
+            )
+            if exclude_paid_tickets
+            else set()
         )
         rows = [
             ImportRow(
@@ -251,7 +276,9 @@ class WaitlistMembershipImporter:
                 status=self._import_status(
                     email=email,
                     lowered_email=lowered_email,
-                    existing_emails=existing_emails,
+                    existing_statuses_by_email=existing_statuses_by_email,
+                    customer_id=customer_id,
+                    paid_ticket_customer_ids=paid_ticket_customer_ids,
                 ),
             )
             for customer, email, lowered_email, name, locale in self._customer_row_parts(
@@ -291,7 +318,7 @@ class WaitlistMembershipImporter:
             event: Event whose answers should be searched.
             valid_for: Event or subevent used to resolve active memberships.
             membership_type_id: Membership type used to select members.
-            email_filter: Optional exact email address used to narrow matches.
+            email_filter: Optional email substring used to narrow matches.
             question_id: Optional question used to filter members.
             option_id: Optional option used to filter members.
             include_testmode: Whether testmode memberships are eligible.
@@ -331,8 +358,8 @@ class WaitlistMembershipImporter:
             matched_customers = [
                 customer
                 for customer in matched_customers
-                if self._normalized_email(value(customer, "email"))
-                == normalized_email_filter
+                if normalized_email_filter
+                in (self._normalized_email(value(customer, "email")) or "")
             ]
         return memberships, customer_ids, matched_customers, membership_created_by_customer
 
@@ -367,19 +394,26 @@ class WaitlistMembershipImporter:
         *,
         email: str | None,
         lowered_email: str | None,
-        existing_emails: set[str],
+        existing_statuses_by_email: dict[str, str],
+        customer_id: str | None,
+        paid_ticket_customer_ids: set[str],
     ) -> str:
         """Resolve the import status for one matched customer.
 
         Args:
             email: Raw customer email, if present.
             lowered_email: Normalized customer email, if present.
-            existing_emails: Emails already on the target waitlist.
+            existing_statuses_by_email: Existing target statuses keyed by email.
+            customer_id: Selected customer's identifier.
+            paid_ticket_customer_ids: Customers who already own paid tickets.
         Returns:
             One of the import preview status codes.
         """
         if not email:
             return "missing_email"
-        if lowered_email in existing_emails:
-            return "already_waiting"
+        existing_status = existing_statuses_by_email.get(lowered_email)
+        if existing_status:
+            return existing_status
+        if customer_id in paid_ticket_customer_ids:
+            return "has_paid_ticket"
         return "would_add"

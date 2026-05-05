@@ -45,6 +45,7 @@ class FakeProvider:
             ),
         ]
         self.updated_priorities = {}
+        self.paid_ticket_customer_ids = set()
 
     def get_subevent(self, event, subevent_id):
         assert event == "ev"
@@ -115,12 +116,13 @@ class FakeProvider:
     def count_waiting_list_entries(self, organizer, event, item, variation=None, subevent=None):
         return len(self.list_waiting_list_entries(organizer, event, item, variation, subevent))
 
-    def list_waiting_list_entry_emails(self, organizer, event, item, variation=None, subevent=None):
+    def waiting_list_import_statuses_by_email(self, organizer, event, item, variation=None, subevent=None):
         return {
-            entry.email.strip().lower()
-            for entry in self.list_waiting_list_entries(organizer, event, item, variation, subevent)
-            if entry.email
+            "two@example.org": "already_waiting",
         }
+
+    def customer_ids_with_paid_tickets(self, organizer, event, customer_ids):
+        return set(customer_ids).intersection(self.paid_ticket_customer_ids)
 
     def waiting_list_preview_page(self, organizer, event, item, variation=None, subevent=None, page=1, per_page=10):
         entries = self.list_waiting_list_entries(organizer, event, item, variation, subevent)
@@ -257,6 +259,7 @@ def test_importer_dry_run_and_actual_import():
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
         subevent_id=12,
+        exclude_paid_tickets=True,
         dry_run=True,
     )
 
@@ -276,6 +279,7 @@ def test_importer_dry_run_and_actual_import():
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
         subevent_id=12,
+        exclude_paid_tickets=True,
         dry_run=False,
     )
 
@@ -317,6 +321,7 @@ def test_importer_without_question_filter_imports_all_members():
         option_id=None,
         target=WaitlistTarget(item_id=5, variation_id=9),
         subevent_id=12,
+        exclude_paid_tickets=True,
         dry_run=True,
     )
 
@@ -338,7 +343,7 @@ def test_importer_prefers_order_datetime_and_falls_back_to_membership_start():
     assert created["CUST2"] == provider.membership_fallback_created
 
 
-def test_importer_email_filter_limits_matches_to_one_customer():
+def test_importer_email_filter_uses_case_insensitive_substring_match():
     provider = FakeProvider()
     importer = WaitlistMembershipImporter(provider)
 
@@ -346,16 +351,42 @@ def test_importer_email_filter_limits_matches_to_one_customer():
         organizer="orga",
         event="ev",
         membership_type_id=7,
-        email_filter=" ONE@example.org ",
+        email_filter=" One@Ex ",
         question_id=None,
         option_id=None,
         target=WaitlistTarget(item_id=5, variation_id=9),
         subevent_id=12,
+        exclude_paid_tickets=True,
         dry_run=True,
     )
 
     assert result.matched_customers == 1
     assert [row.email for row in result.rows] == ["one@example.org"]
+
+
+def test_importer_blocks_paid_ticket_holders_when_enabled():
+    provider = FakeProvider()
+    provider.paid_ticket_customer_ids = {"CUST1"}
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        email_filter=None,
+        question_id=None,
+        option_id=None,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        exclude_paid_tickets=True,
+        dry_run=True,
+    )
+
+    assert [row.status for row in result.rows] == [
+        "has_paid_ticket",
+        "already_waiting",
+        "missing_email",
+    ]
 
 
 def test_import_preview_uses_samples_and_waitlist_rows():
@@ -371,6 +402,7 @@ def test_import_preview_uses_samples_and_waitlist_rows():
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
         subevent_id=12,
+        exclude_paid_tickets=True,
         sample_size=1,
     )
 
@@ -390,6 +422,7 @@ def test_import_preview_uses_samples_and_waitlist_rows():
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
         subevent_id=12,
+        exclude_paid_tickets=True,
         sample_size=1,
         import_page=2,
         current_waitlist_page=2,

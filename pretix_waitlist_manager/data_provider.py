@@ -8,6 +8,8 @@ from pretix.base.models import (
     Item,
     Membership,
     MembershipType,
+    Order,
+    OrderPosition,
     Question,
     QuestionAnswer,
     QuestionOption,
@@ -326,6 +328,7 @@ class PretixDataProvider:
                     item=item,
                     variation=variation,
                     subevent=subevent,
+                    include_vouchers=False,
                 ).only(
                     "pk",
                     "email",
@@ -362,17 +365,18 @@ class PretixDataProvider:
                 item=item,
                 variation=variation,
                 subevent=subevent,
+                include_vouchers=False,
             ).count()
 
-    def list_waiting_list_entry_emails(
+    def waiting_list_import_statuses_by_email(
         self,
         organizer,
         event,
         item: int,
         variation: int | None = None,
         subevent: int | None = None,
-    ) -> set[str]:
-        """Load normalized emails for one waitlist target.
+    ) -> dict[str, str]:
+        """Load import-blocking waitlist statuses keyed by normalized email.
 
         Args:
             organizer: Organizer owning the scoped query.
@@ -381,21 +385,59 @@ class PretixDataProvider:
             variation: Optional variation id of the target.
             subevent: Optional subevent id of the target.
         Returns:
-            A set of normalized email addresses currently on the waitlist.
+            A mapping of normalized email addresses to import status codes.
         """
         with scope(organizer=organizer):
-            return {
-                email.strip().lower()
-                for email in self._waiting_list_queryset(
+            statuses: dict[str, str] = {}
+            qs = self._waiting_list_queryset(
                     event=event,
                     item=item,
                     variation=variation,
                     subevent=subevent,
+                    include_vouchers=True,
+                ).select_related("voucher").exclude(email="").only(
+                    "email",
+                    "voucher__redeemed",
+                    "voucher__max_usages",
+                    "voucher__valid_until",
                 )
-                .exclude(email="")
-                .values_list("email", flat=True)
-                if email
-            }
+            for entry in qs:
+                email = entry.email.strip().lower() if entry.email else None
+                if not email:
+                    continue
+                statuses[email] = self._waiting_list_entry_import_status(entry)
+            return statuses
+
+    def customer_ids_with_paid_tickets(
+        self,
+        organizer,
+        event,
+        customer_ids: list[str],
+    ) -> set[str]:
+        """Load customer ids that already own a paid admission ticket.
+
+        Args:
+            organizer: Organizer owning the scoped query.
+            event: Event whose paid tickets should be searched.
+            customer_ids: Candidate customer identifiers to check.
+        Returns:
+            Customer identifiers with a paid, non-canceled admission position.
+        """
+        if not customer_ids:
+            return set()
+        with scope(organizer=organizer):
+            return set(
+                OrderPosition.objects.filter(
+                    order__event=event,
+                    order__status=Order.STATUS_PAID,
+                    order__customer__identifier__in=customer_ids,
+                    canceled=False,
+                    item__admission=True,
+                    line_price_gross__gt=0,
+                )
+                .values_list("order__customer__identifier", flat=True)
+                .distinct()
+            )
 
     def waiting_list_preview_page(
         self,
@@ -426,6 +468,7 @@ class PretixDataProvider:
                 item=item,
                 variation=variation,
                 subevent=subevent,
+                include_vouchers=False,
             ).only(
                 "pk",
                 "email",
@@ -524,21 +567,40 @@ class PretixDataProvider:
         item: int,
         variation: int | None,
         subevent: int | None,
+        include_vouchers: bool,
     ):
-        """Build the base queryset for current waiting-list entries.
+        """Build the base queryset for waiting-list entries.
 
         Args:
             event: Event whose waiting list should be queried.
             item: Item id of the waitlist target.
             variation: Optional variation id of the target.
             subevent: Optional subevent id of the target.
+            include_vouchers: Whether voucher-issued entries should be included.
         Returns:
-            An ordered queryset for voucher-less waiting-list entries.
+            An ordered queryset for waitlist entries scoped to one target.
         """
-        return WaitingListEntry.objects.filter(
+        qs = WaitingListEntry.objects.filter(
             event=event,
             item_id=item,
             variation_id=variation,
             subevent_id=subevent,
-            voucher__isnull=True,
-        ).order_by("-priority", "created", "pk")
+        )
+        if not include_vouchers:
+            qs = qs.filter(voucher__isnull=True)
+        return qs.order_by("-priority", "created", "pk")
+
+    def _waiting_list_entry_import_status(self, entry: WaitingListEntry) -> str:
+        """Resolve the import-blocking status for one waitlist entry.
+
+        Args:
+            entry: Waiting-list entry for the selected target.
+        Returns:
+            An import status code describing why the email is already covered.
+        """
+        if not entry.voucher_id:
+            return "already_waiting"
+        voucher = entry.voucher
+        if voucher and voucher.redeemed >= voucher.max_usages:
+            return "voucher_redeemed"
+        return "voucher_assigned"

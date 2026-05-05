@@ -45,15 +45,30 @@ class WaitlistImportForm(forms.Form):
     """Collect filter options for importing members onto a waitlist."""
 
     membership_type = forms.ChoiceField(label=_("Membership type"))
-    email = forms.EmailField(
+    email = forms.CharField(
         required=False,
         label=_("Email filter"),
-        help_text=_("Leave blank to include all members in this membership type."),
+        help_text=_(
+            "Leave blank to include all members in this membership type. Partial email matches are allowed."
+        ),
     )
     question = forms.ChoiceField(label=_("Question filter"), required=False)
     answer = forms.ChoiceField(label=_("Required answer"), required=False)
     target = forms.ChoiceField(label=_("Target waitlist"))
     subevent = forms.ChoiceField(label=_("Event date"), required=False)
+    exclude_paid_tickets = forms.TypedChoiceField(
+        label=_("Exclude paid ticket holders"),
+        required=False,
+        initial="yes",
+        choices=(
+            ("yes", _("Yes")),
+            ("no", _("No")),
+        ),
+        coerce=lambda value: value != "no",
+        help_text=_(
+            "Exclude customers who already have a paid admission ticket for this event. Free tickets do not count."
+        ),
+    )
     include_testmode = forms.BooleanField(
         required=False,
         label=_("Include test mode memberships"),

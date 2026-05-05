@@ -338,6 +338,7 @@ class WaitlistManagerFormsMixin:
             option_id=self._optional_int(form.cleaned_data.get("answer")),
             target=target,
             subevent_id=self._optional_int(form.cleaned_data.get("subevent")),
+            exclude_paid_tickets=form.cleaned_data["exclude_paid_tickets"],
             include_testmode=form.cleaned_data["include_testmode"],
             dry_run=form.cleaned_data["dry_run"],
             user=self.request.user,
@@ -816,6 +817,7 @@ class WaitlistImportPreviewView(WaitlistManagerPreviewView):
                 option_id=self._optional_int(form.cleaned_data.get("answer")),
                 target=parse_target_choice(form.cleaned_data["target"]),
                 subevent_id=self._optional_int(form.cleaned_data.get("subevent")),
+                exclude_paid_tickets=form.cleaned_data["exclude_paid_tickets"],
                 include_testmode=form.cleaned_data["include_testmode"],
                 import_page=_positive_int(request.GET.get("import_page")),
                 current_waitlist_page=_positive_int(
