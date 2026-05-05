@@ -20,6 +20,7 @@ class WaitlistMembershipImporter:
         organizer,
         event,
         membership_type_id: int,
+        email_filter: str | None,
         question_id: int | None,
         option_id: int | None,
         target: WaitlistTarget,
@@ -34,6 +35,7 @@ class WaitlistMembershipImporter:
             organizer: Organizer owning the data scope.
             event: Event whose waitlist is being updated.
             membership_type_id: Membership type used to select members.
+            email_filter: Optional exact email address used to narrow matches.
             question_id: Optional question whose answer filters members.
             option_id: Optional question option that must be selected.
             target: Selected waitlist item or variation.
@@ -55,6 +57,7 @@ class WaitlistMembershipImporter:
             event=event,
             valid_for=valid_for,
             membership_type_id=membership_type_id,
+            email_filter=email_filter,
             question_id=question_id,
             option_id=option_id,
             include_testmode=include_testmode,
@@ -188,6 +191,7 @@ class WaitlistMembershipImporter:
         organizer,
         event,
         membership_type_id: int,
+        email_filter: str | None,
         question_id: int | None,
         option_id: int | None,
         target: WaitlistTarget,
@@ -203,6 +207,7 @@ class WaitlistMembershipImporter:
             organizer: Organizer owning the data scope.
             event: Event whose waitlist is being previewed.
             membership_type_id: Membership type used to select members.
+            email_filter: Optional exact email address used to narrow matches.
             question_id: Optional question whose answer filters members.
             option_id: Optional question option that must be selected.
             target: Selected waitlist item or variation.
@@ -225,6 +230,7 @@ class WaitlistMembershipImporter:
             event=event,
             valid_for=valid_for,
             membership_type_id=membership_type_id,
+            email_filter=email_filter,
             question_id=question_id,
             option_id=option_id,
             include_testmode=include_testmode,
@@ -273,6 +279,7 @@ class WaitlistMembershipImporter:
         event,
         valid_for,
         membership_type_id: int,
+        email_filter: str | None,
         question_id: int | None,
         option_id: int | None,
         include_testmode: bool,
@@ -284,6 +291,7 @@ class WaitlistMembershipImporter:
             event: Event whose answers should be searched.
             valid_for: Event or subevent used to resolve active memberships.
             membership_type_id: Membership type used to select members.
+            email_filter: Optional exact email address used to narrow matches.
             question_id: Optional question used to filter members.
             option_id: Optional option used to filter members.
             include_testmode: Whether testmode memberships are eligible.
@@ -318,6 +326,14 @@ class WaitlistMembershipImporter:
             organizer,
             sorted(matching_customer_ids),
         )
+        normalized_email_filter = self._normalized_email(email_filter)
+        if normalized_email_filter:
+            matched_customers = [
+                customer
+                for customer in matched_customers
+                if self._normalized_email(value(customer, "email"))
+                == normalized_email_filter
+            ]
         return memberships, customer_ids, matched_customers, membership_created_by_customer
 
     def _customer_row_parts(self, matched_customers):
@@ -334,6 +350,17 @@ class WaitlistMembershipImporter:
             name = value(customer, "name_cached") or value(customer, "name") or None
             locale = value(customer, "locale") or None
             yield customer, email, lowered_email, name, locale
+
+    def _normalized_email(self, email: str | None) -> str | None:
+        """Normalize an optional email address for case-insensitive matching.
+
+        Args:
+            email: Raw email address from the form or customer record.
+        Returns:
+            A lowercased, trimmed email string, or `None` if blank.
+        """
+        normalized = (email or "").strip().lower()
+        return normalized or None
 
     def _import_status(
         self,

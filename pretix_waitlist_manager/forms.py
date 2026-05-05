@@ -45,6 +45,11 @@ class WaitlistImportForm(forms.Form):
     """Collect filter options for importing members onto a waitlist."""
 
     membership_type = forms.ChoiceField(label=_("Membership type"))
+    email = forms.EmailField(
+        required=False,
+        label=_("Email filter"),
+        help_text=_("Leave blank to include all members in this membership type."),
+    )
     question = forms.ChoiceField(label=_("Question filter"), required=False)
     answer = forms.ChoiceField(label=_("Required answer"), required=False)
     target = forms.ChoiceField(label=_("Target waitlist"))

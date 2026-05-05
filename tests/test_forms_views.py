@@ -143,6 +143,7 @@ def test_import_form_without_subevents_uses_placeholder():
 
     assert form.fields["subevent"].required is False
     assert form.fields["subevent"].choices == [("", "This event has no subevents")]
+    assert form.fields["email"].required is False
     assert form.fields["question"].choices == [("", "No question filter"), ("10", "Meal")]
     assert form.fields["answer"].choices == [("", "No answer filter")]
 
@@ -238,6 +239,7 @@ def test_import_run_view_dry_run_redirects_and_reports(monkeypatch):
         method="post",
         data={
             "import-membership_type": "7",
+            "import-email": "one@example.org",
             "import-question": "10",
             "import-answer": "21",
             "import-target": "5:",
@@ -275,6 +277,7 @@ def test_import_run_view_dry_run_redirects_and_reports(monkeypatch):
     assert response.status_code == 302
     assert response["Location"].endswith("/control/event/demo/preview/waitlist-manager/import/")
     assert calls["kwargs"]["dry_run"] is True
+    assert calls["kwargs"]["email_filter"] == "one@example.org"
     assert calls["kwargs"]["question_id"] == 10
     assert calls["kwargs"]["option_id"] == 21
     assert messages == [("info", "Dry run completed. No waitlist entries were created.")]
@@ -285,6 +288,7 @@ def test_import_run_view_accepts_blank_question_filter(monkeypatch):
         method="post",
         data={
             "import-membership_type": "7",
+            "import-email": "",
             "import-question": "",
             "import-answer": "",
             "import-target": "5:",
@@ -319,6 +323,7 @@ def test_import_run_view_accepts_blank_question_filter(monkeypatch):
     response = view.post(request)
 
     assert response.status_code == 302
+    assert calls["kwargs"]["email_filter"] == ""
     assert calls["kwargs"]["question_id"] is None
     assert calls["kwargs"]["option_id"] is None
 
@@ -370,6 +375,7 @@ def test_import_preview_view_returns_html_and_uses_page_params(monkeypatch):
     request = _request(
         data={
             "import-membership_type": "7",
+            "import-email": "one@example.org",
             "import-question": "10",
             "import-answer": "21",
             "import-target": "5:",
@@ -431,6 +437,7 @@ def test_import_preview_view_returns_html_and_uses_page_params(monkeypatch):
     payload = _json(response)
 
     assert response.status_code == 200
+    assert calls["kwargs"]["email_filter"] == "one@example.org"
     assert calls["kwargs"]["import_page"] == 2
     assert calls["kwargs"]["current_waitlist_page"] == 3
     assert payload["question_choices"] == [["", "No question filter"], ["10", "Meal"]]
@@ -443,6 +450,7 @@ def test_import_preview_view_accepts_blank_question_filter(monkeypatch):
     request = _request(
         data={
             "import-membership_type": "7",
+            "import-email": "",
             "import-question": "",
             "import-answer": "",
             "import-target": "5:",
@@ -476,6 +484,7 @@ def test_import_preview_view_accepts_blank_question_filter(monkeypatch):
     payload = _json(response)
 
     assert response.status_code == 200
+    assert calls["kwargs"]["email_filter"] == ""
     assert calls["kwargs"]["question_id"] is None
     assert calls["kwargs"]["option_id"] is None
     assert payload["question_choices"] == [["", "No question filter"], ["10", "Meal"]]

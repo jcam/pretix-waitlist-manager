@@ -252,6 +252,7 @@ def test_importer_dry_run_and_actual_import():
         organizer="orga",
         event="ev",
         membership_type_id=7,
+        email_filter=None,
         question_id=10,
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
@@ -270,6 +271,7 @@ def test_importer_dry_run_and_actual_import():
         organizer="orga",
         event="ev",
         membership_type_id=7,
+        email_filter=None,
         question_id=10,
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
@@ -310,6 +312,7 @@ def test_importer_without_question_filter_imports_all_members():
         organizer="orga",
         event="ev",
         membership_type_id=7,
+        email_filter=None,
         question_id=None,
         option_id=None,
         target=WaitlistTarget(item_id=5, variation_id=9),
@@ -335,6 +338,26 @@ def test_importer_prefers_order_datetime_and_falls_back_to_membership_start():
     assert created["CUST2"] == provider.membership_fallback_created
 
 
+def test_importer_email_filter_limits_matches_to_one_customer():
+    provider = FakeProvider()
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        email_filter=" ONE@example.org ",
+        question_id=None,
+        option_id=None,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        dry_run=True,
+    )
+
+    assert result.matched_customers == 1
+    assert [row.email for row in result.rows] == ["one@example.org"]
+
+
 def test_import_preview_uses_samples_and_waitlist_rows():
     provider = FakeProvider()
     importer = WaitlistMembershipImporter(provider)
@@ -343,6 +366,7 @@ def test_import_preview_uses_samples_and_waitlist_rows():
         organizer="orga",
         event="ev",
         membership_type_id=7,
+        email_filter=None,
         question_id=10,
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
@@ -361,6 +385,7 @@ def test_import_preview_uses_samples_and_waitlist_rows():
         organizer="orga",
         event="ev",
         membership_type_id=7,
+        email_filter=None,
         question_id=10,
         option_id=21,
         target=WaitlistTarget(item_id=5, variation_id=9),
