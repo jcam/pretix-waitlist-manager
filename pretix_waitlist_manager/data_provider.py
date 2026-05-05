@@ -433,7 +433,7 @@ class PretixDataProvider:
                     order__customer__identifier__in=customer_ids,
                     canceled=False,
                     item__admission=True,
-                    line_price_gross__gt=0,
+                    price__gt=0,
                 )
                 .values_list("order__customer__identifier", flat=True)
                 .distinct()

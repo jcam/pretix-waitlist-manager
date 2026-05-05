@@ -46,6 +46,9 @@ class FakeProvider:
         ]
         self.updated_priorities = {}
         self.paid_ticket_customer_ids = set()
+        self.waitlist_statuses_by_email = {
+            "two@example.org": "already_waiting",
+        }
 
     def get_subevent(self, event, subevent_id):
         assert event == "ev"
@@ -117,9 +120,7 @@ class FakeProvider:
         return len(self.list_waiting_list_entries(organizer, event, item, variation, subevent))
 
     def waiting_list_import_statuses_by_email(self, organizer, event, item, variation=None, subevent=None):
-        return {
-            "two@example.org": "already_waiting",
-        }
+        return dict(self.waitlist_statuses_by_email)
 
     def customer_ids_with_paid_tickets(self, organizer, event, customer_ids):
         return set(customer_ids).intersection(self.paid_ticket_customer_ids)
@@ -386,6 +387,153 @@ def test_importer_blocks_paid_ticket_holders_when_enabled():
         "has_paid_ticket",
         "already_waiting",
         "missing_email",
+    ]
+
+
+def test_importer_allows_paid_ticket_holders_when_exclusion_is_disabled():
+    provider = FakeProvider()
+    provider.paid_ticket_customer_ids = {"CUST1"}
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        email_filter=None,
+        question_id=None,
+        option_id=None,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        exclude_paid_tickets=False,
+        dry_run=True,
+    )
+
+    assert [row.status for row in result.rows] == [
+        "would_add",
+        "already_waiting",
+        "missing_email",
+    ]
+
+
+def test_importer_blocks_voucher_assigned_and_redeemed_statuses():
+    provider = FakeProvider()
+    provider.waitlist_statuses_by_email = {
+        "one@example.org": "voucher_assigned",
+        "two@example.org": "voucher_redeemed",
+    }
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        email_filter=None,
+        question_id=None,
+        option_id=None,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        exclude_paid_tickets=False,
+        dry_run=True,
+    )
+
+    assert [row.status for row in result.rows] == [
+        "voucher_assigned",
+        "voucher_redeemed",
+        "missing_email",
+    ]
+
+
+def test_importer_status_precedence_prefers_waitlist_status_over_paid_ticket():
+    provider = FakeProvider()
+    provider.waitlist_statuses_by_email = {
+        "one@example.org": "voucher_assigned",
+        "two@example.org": "already_waiting",
+    }
+    provider.paid_ticket_customer_ids = {"CUST1", "CUST2"}
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        email_filter=None,
+        question_id=None,
+        option_id=None,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        exclude_paid_tickets=True,
+        dry_run=True,
+    )
+
+    assert [row.status for row in result.rows] == [
+        "voucher_assigned",
+        "already_waiting",
+        "missing_email",
+    ]
+
+
+def test_importer_status_precedence_prefers_missing_email_over_paid_ticket():
+    provider = FakeProvider()
+    provider.paid_ticket_customer_ids = {"CUST3"}
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        email_filter=None,
+        question_id=None,
+        option_id=None,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        exclude_paid_tickets=True,
+        dry_run=True,
+    )
+
+    assert result.rows[-1].status == "missing_email"
+
+
+def test_importer_duplicate_email_blocks_multiple_customers():
+    provider = FakeProvider()
+
+    def duplicate_customers(organizer, customer_ids):
+        return [
+            {
+                "identifier": "CUST1",
+                "email": "shared@example.org",
+                "name": "Customer One",
+                "locale": "en",
+            },
+            {
+                "identifier": "CUST2",
+                "email": "shared@example.org",
+                "name": "Customer Two",
+                "locale": "de",
+            },
+        ]
+
+    provider.list_customers = duplicate_customers
+    provider.waitlist_statuses_by_email = {
+        "shared@example.org": "already_waiting",
+    }
+    importer = WaitlistMembershipImporter(provider)
+
+    result = importer.run(
+        organizer="orga",
+        event="ev",
+        membership_type_id=7,
+        email_filter=None,
+        question_id=10,
+        option_id=21,
+        target=WaitlistTarget(item_id=5, variation_id=9),
+        subevent_id=12,
+        exclude_paid_tickets=True,
+        dry_run=True,
+    )
+
+    assert [row.status for row in result.rows] == [
+        "already_waiting",
+        "already_waiting",
     ]
 
 
